@@ -237,7 +237,7 @@ export default function EventStyled({
         >
           {/* Main card surface (full-color) */}
           <div
-            className={cn(`${bodyPadding} min-h-0 ${bodyRadius} ${surfaceBgClass} ${surfaceTextClass}`)}
+            className={cn(`${bodyPadding} min-h-0 ${!isCompact ? 'h-full' : ''} ${bodyRadius} ${surfaceBgClass} ${surfaceTextClass}`)}
             style={{ ...(bgInlineStyle || {}), boxShadow: isCompact ? (event?.minmized ? '0 2px 6px rgba(2,6,23,0.04)' : '0 4px 8px rgba(2,6,23,0.06)') : (event?.minmized ? '0 6px 12px rgba(2,6,23,0.04)' : '0 6px 18px rgba(2,6,23,0.06)') }}
           >
             {event?.minmized ? (

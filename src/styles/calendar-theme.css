@@ -158,13 +158,14 @@ html.dark .calendar-root .text-slate-900 { color: var(--brand-900) !important; }
 
 /* Wrapper for month grid to constrain overall height and make grid scrollable when month is tall */
 .calendar-grid-wrapper {
-  /* Fix the wrapper height to available viewport space so the month grid always fits.
-     Rows will equally share this height via grid-auto-rows: 1fr on the inner grid. */
-  height: calc(100vh - 220px);
+  /* Stronger guard: cap wrapper height to viewport minus top controls. This is defensive
+     — even if content inside attempts to grow, rows will not expand beyond the wrapper. */
+  max-height: calc(100vh - 160px);
+  height: auto;
   overflow: auto;
   -webkit-overflow-scrolling: touch;
 }
-.calendar-grid-wrapper .grid { align-items: stretch; grid-auto-rows: 1fr; }
+.calendar-grid-wrapper .grid { align-items: stretch; grid-auto-rows: minmax(0, 1fr); }
 
 /* Ensure day event containers are compact and don't force the day cell to expand */
 .day-events-container { display: block; }
