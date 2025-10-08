@@ -170,22 +170,34 @@ export default function EventStyled({
   // - minmized (non-compact): used by timetable minimized events (keep larger appearance)
   const isCompact = !!event?.compact;
 
+  // Restore timetable (non-compact) visuals: full height, larger paddings and radii
   const containerClass = cn(
     'w-full z-50 relative cursor-pointer group overflow-hidden transition-shadow duration-200',
-    // keep h-full for non-compact (timetable) so it fills its column positioning as before
+    // non-compact should fill its slot (timetable)
     !isCompact ? 'h-full' : '',
-    // rounded: compact gets small radius, minimized (timetable) gets larger rounded look
-    isCompact ? (event?.minmized ? 'rounded-sm' : 'rounded-md') : (event?.minmized ? 'rounded-lg' : 'rounded-xl')
+    // rounding: timetable defaults to larger rounded shapes, compact (calendar) uses smaller
+    !isCompact ? (event?.minmized ? 'rounded-lg' : 'rounded-xl') : (event?.minmized ? 'rounded-sm' : 'rounded-md')
   );
 
-  const bodyPadding = isCompact ? (event?.minmized ? 'px-2 py-1' : 'p-2') : (event?.minmized ? 'px-3 py-1.5' : 'p-3');
+  // For minimized timeline events we want the colored surface to fill the
+  // exact height computed by the layout engine. Remove vertical padding for
+  // minimized (timeline) items so they visually cover the whole grid slot.
+  const bodyPadding = !isCompact ? (event?.minmized ? 'p-0' : 'p-3') : (event?.minmized ? 'px-2 py-1' : 'p-2');
   const titleClass = event?.minmized ? 'font-semibold text-[13px] truncate' : 'font-semibold text-base truncate';
   const minimizedMaxWidth = 'max-w-[220px]';
-  // body radius: compact view uses small radii; timetable minimized uses pill-like radius
-  const bodyRadius = isCompact ? (event?.minmized ? 'rounded-sm' : 'rounded-md') : (event?.minmized ? 'rounded-full' : 'rounded-md');
+  // body radius: timetable minimized is pill-like, otherwise medium rounded; compact uses small radii
+  const bodyRadius = !isCompact ? (event?.minmized ? 'rounded-full' : 'rounded-md') : (event?.minmized ? 'rounded-sm' : 'rounded-md');
 
   return (
-    <div key={event?.id} className={containerClass} style={{ lineHeight: 1 }}>
+    // Ensure minimized timeline items explicitly fill the wrapper height by
+    // applying an inline height:100% when appropriate. This guarantees that
+    // the inner surface (which already uses h-full) occupies the entire
+    // computed pixel height provided by the parent.
+    <div
+      key={event?.id}
+      className={containerClass}
+      style={{ lineHeight: 1, height: event?.minmized && !isCompact ? '100%' : undefined }}
+    >
       {/* Delete button - shown by default for non-minimized, or on hover for minimized */}
       <Button
         onClick={(e: React.MouseEvent<HTMLButtonElement>) => {
