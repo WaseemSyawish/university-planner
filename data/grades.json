@@ -1,0 +1,23 @@
+[
+  {
+    "id": 1759127381332,
+    "name": "Embedded Systems",
+    "code": "CE304",
+    "semester": "2025-1",
+    "assessments": []
+  },
+  {
+    "id": 1759127381354,
+    "name": "Human Computer Interface",
+    "code": "CSE304",
+    "semester": "2025-1",
+    "assessments": []
+  },
+  {
+    "id": 1759127381375,
+    "name": "Secure Software Development",
+    "code": "SE403",
+    "semester": "2025-1",
+    "assessments": []
+  }
+]

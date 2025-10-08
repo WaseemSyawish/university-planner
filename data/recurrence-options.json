@@ -1,0 +1,8 @@
+[
+  { "id": "none", "label": "One time event", "rruleTemplate": null },
+  { "id": "daily", "label": "Daily", "rruleTemplate": "FREQ=DAILY;INTERVAL=1" },
+  { "id": "weekly", "label": "Weekly", "rruleTemplate": "FREQ=WEEKLY;INTERVAL=1" },
+  { "id": "monthly", "label": "Monthly", "rruleTemplate": "FREQ=MONTHLY;INTERVAL=1" },
+  { "id": "yearly", "label": "Yearly", "rruleTemplate": "FREQ=YEARLY;INTERVAL=1" },
+  { "id": "custom", "label": "Custom", "rruleTemplate": "" }
+]

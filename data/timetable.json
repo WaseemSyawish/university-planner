@@ -1,0 +1,22 @@
+[
+  {
+    "id": "tpl-1001",
+    "title": "Calculus I",
+    "dayOfWeek": 1,
+    "time": "09:00",
+    "durationMinutes": 60,
+    "repeatOption": "every-week",
+    "courseId": "CS101",
+    "active": true
+  },
+  {
+    "id": "tpl-1002",
+    "title": "Physics Lab",
+    "dayOfWeek": 3,
+    "time": "14:00",
+    "durationMinutes": 120,
+    "repeatOption": "every-week",
+    "courseId": "PHY101",
+    "active": true
+  }
+]

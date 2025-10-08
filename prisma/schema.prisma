@@ -1,0 +1,162 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL_SQLITE")
+}
+
+model User {
+  id                  String              @id @default(uuid())
+  email               String              @unique
+  // JSON blob for user preferences (theme, weekStartsOn, defaultView, etc.)
+  settings            Json?
+  password_hash       String?
+  name                String?
+  created_at          DateTime?           @default(now())
+  updated_at          DateTime?           @default(now())
+  attendance_sessions AttendanceSession[]
+  courses             Course[]
+  events              Event[]
+  archived_events     ArchivedEvent[]
+
+  @@map("users")
+}
+
+model Course {
+  id                  String              @id @default(uuid())
+  name                String
+  code                String?
+  credits             Int?                @default(3)
+  color               String?
+  semester            String?
+  instructor          String?
+  description         String?
+  user_id             String
+  created_at          DateTime?           @default(now())
+  updated_at          DateTime?           @default(now())
+  attendance_sessions AttendanceSession[]
+  users               User                @relation(fields: [user_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  events              Event[]
+  archived_events     ArchivedEvent[]
+
+  @@map("courses")
+}
+
+model AttendanceSession {
+  id         String            @id @default(uuid())
+  date       DateTime
+  status     attendance_status
+  points     Int?              @default(0)
+  notes      String?
+  user_id    String
+  course_id  String
+  created_at DateTime?         @default(now())
+  updated_at DateTime?         @default(now())
+  courses    Course            @relation(fields: [course_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  users      User              @relation(fields: [user_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@index([date], map: "idx_attendance_date")
+  @@index([user_id, course_id], map: "idx_attendance_user_course")
+  @@map("attendance_sessions")
+}
+
+enum attendance_status {
+  PRESENT
+  ABSENT
+  HOLIDAY
+  EXCUSED
+  LATE
+}
+
+model Event {
+  id          String    @id @default(uuid())
+  title       String
+  type        String    @default("assignment")
+  // human-friendly location/room text (kept separate from description)
+  location    String?
+  archived    Boolean   @default(false)
+  course_id   String?
+  template_id String?
+  date        DateTime
+  time        String?
+  end_date    DateTime?
+  description String?
+  // optional JSON blob for UI metadata (color/variant/durationMinutes etc.)
+  meta        Json?
+  completed   Boolean   @default(false)
+  user_id     String
+  created_at  DateTime? @default(now())
+  updated_at  DateTime? @default(now())
+
+  courses Course? @relation(fields: [course_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  eventTemplate EventTemplate? @relation(fields: [template_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  users   User    @relation(fields: [user_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  attachments Attachment[]
+
+  @@index([date], map: "idx_events_date")
+  @@index([user_id], map: "idx_events_user")
+  @@map("events")
+}
+
+model EventTemplate {
+  id          String    @id @default(uuid())
+  title       String
+  course_id   String?
+  repeat_option String?
+  start_date  DateTime?
+  // payload is a JSON blob storing timetable template details such as
+  // an array of module definitions (room, time, duration, periods, etc.)
+  // This allows a template to represent multiple modules without
+  // materializing them as Event rows until the user chooses to apply it.
+  payload     Json?
+  user_id     String
+  created_at  DateTime? @default(now())
+  updated_at  DateTime? @default(now())
+
+  events  Event[]
+
+  @@map("event_templates")
+}
+
+model ArchivedEvent {
+  id                String    @id @default(uuid())
+  original_event_id String?   @unique
+  title             String
+  type              String    @default("assignment")
+  archived          Boolean   @default(true)
+  course_id         String?
+  // preserved location/room when archiving
+  location          String?
+  date              DateTime
+  time              String?
+  description       String?
+  // optional JSON blob for UI metadata (color/variant/durationMinutes etc.)
+  meta              Json?
+  completed         Boolean   @default(false)
+  user_id           String
+  created_at        DateTime? @default(now())
+  updated_at        DateTime? @default(now())
+
+  courses Course? @relation(fields: [course_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  users   User    @relation(fields: [user_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@index([date], map: "idx_archived_events_date")
+  @@index([user_id], map: "idx_archived_events_user")
+  @@map("archived_events")
+}
+
+model Attachment {
+  id         String   @id @default(uuid())
+  filename   String
+  path       String
+  mime       String?
+  size       Int?
+  event_id   String
+  created_at DateTime? @default(now())
+
+  event Event @relation(fields: [event_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@map("attachments")
+}

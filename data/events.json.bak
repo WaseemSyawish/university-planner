@@ -1,0 +1,40 @@
+{
+  "events": [
+    {
+      "id": "1758142759573",
+      "title": "t",
+      "date": "2025-09-17T20:59:19.571Z",
+      "user_id": "u",
+      "archived": true,
+      "created_at": "2025-09-17T20:59:19.573Z",
+      "updated_at": "2025-09-17T20:59:19.574Z"
+    },
+    {
+      "id": "1758273610131",
+      "title": "f",
+      "type": "class",
+      "course_id": null,
+      "date": "2025-09-19",
+      "time": "",
+      "description": null,
+      "completed": false,
+      "user_id": "aef344d3-e602-402d-85de-055ba3c4629b",
+      "archived": false,
+      "created_at": "2025-09-19T09:20:10.131Z",
+      "updated_at": "2025-09-19T09:20:10.131Z"
+    },
+    {
+      "id": "1758273754948",
+      "title": "f",
+      "course_id": null,
+      "date": "2025-09-19",
+      "description": "test",
+      "completed": false,
+      "user_id": "aef344d3-e602-402d-85de-055ba3c4629b",
+      "archived": false,
+      "created_at": "2025-09-19T09:22:34.948Z",
+      "updated_at": "2025-09-19T09:22:34.948Z"
+    }
+  ],
+  "nextId": 15
+}

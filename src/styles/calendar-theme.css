@@ -1,0 +1,184 @@
+/* Calendar theme tokens — small design system for MonthView and EventModal */
+:root {
+  --cal-bg: var(--card-bg, #ffffff);
+  --cal-surface: #f8fafc; /* base-100 */
+  --cal-muted: #6b7280; /* gray-500 */
+  --cal-accent: #4f46e5; /* indigo-600 */
+  --cal-accent-2: #60a5fa; /* blue-400 as softer secondary accent */
+  --cal-pill-bg: linear-gradient(90deg, rgba(96,165,250,0.06), rgba(96,165,250,0.04));
+  --cal-pill-border: rgba(96,165,250,0.10);
+  --cal-shadow-sm: 0 1px 2px rgba(16,24,40,0.04);
+  --cal-shadow-md: 0 6px 24px rgba(15,23,42,0.06);
+  --cal-radius: 6px;
+  --cal-muted-2: #9ca3af;
+}
+
+/* Dark mode adaptations for calendar — reuse global tokens where possible */
+html.dark {
+  --cal-bg: var(--card-bg);
+  --cal-surface: var(--card-bg);
+  --cal-muted: var(--muted-600);
+  --cal-accent: var(--accent-indigo-600);
+  --cal-accent-2: var(--accent-indigo-500);
+  --cal-pill-bg: linear-gradient(90deg, rgba(255,255,255,0.02), rgba(255,255,255,0.01));
+  --cal-pill-border: rgba(255,255,255,0.04);
+  --cal-shadow-sm: 0 6px 18px rgba(2,6,23,0.5);
+  --cal-shadow-md: 0 12px 36px rgba(2,6,23,0.55);
+  --cal-muted-2: #94a3b8;
+}
+
+/* Small utility helpers for our components */
+.cal-card {
+  background: var(--cal-bg);
+  border-radius: var(--cal-radius);
+  box-shadow: var(--cal-shadow-sm);
+}
+
+.cal-pill {
+  background: var(--cal-pill-bg);
+  border: 1px solid var(--cal-pill-border);
+  border-radius: 6px;
+}
+
+.cal-action {
+  background: var(--card-bg);
+  border-radius: 8px;
+  padding: 8px 12px;
+  border: 1px solid rgba(15,23,42,0.04);
+}
+
+/* Typography */
+:root {
+  --cal-font-sans: Inter, ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial;
+}
+
+body { font-family: var(--cal-font-sans); }
+
+/* Pills & event styles */
+.cal-event-pill {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.45rem 0.6rem;
+  border-radius: 6px;
+  background: var(--cal-pill-bg);
+  border: 1px solid var(--cal-pill-border);
+  box-shadow: none;
+  transition: transform 120ms ease, box-shadow 120ms ease, background 120ms ease;
+}
+.cal-event-pill:hover, .cal-event-pill:focus {
+  transform: translateY(-1px);
+  box-shadow: var(--cal-shadow-md);
+  outline: none;
+}
+.cal-event-title { font-size: 0.92rem; font-weight: 600; color: #1f2937; }
+.cal-event-sub { font-size: 0.78rem; color: var(--cal-muted); }
+
+/* Grid utilities */
+.cal-weekday-header { color: #111827; font-weight: 700; }
+.cal-day-cell { min-height: 72px; }
+
+/* Make sure day cells and grid follow dark mode tokens */
+html.dark .cal-weekday-header { color: var(--muted-700); }
+html.dark .cal-day-cell { background: transparent; }
+
+/* Calendar container background mapping */
+.calendar-container { background: var(--cal-surface); }
+html.dark .calendar-container { background: var(--surface); color: var(--brand-900); }
+
+/* Event blocks in dark: use card surface and readable text */
+.calendar-event {
+  background: var(--cal-bg);
+  border: 1px solid rgba(255,255,255,0.04);
+  color: var(--brand-900);
+}
+
+/* Action buttons and pills */
+.cal-action { background: var(--card-bg); border:1px solid rgba(255,255,255,0.04); color:var(--brand-900); }
+.cal-pill { background: var(--cal-pill-bg); border:1px solid var(--cal-pill-border); }
+
+/* Event title and subtitle adapt */
+.cal-event-title { color: var(--brand-900); }
+.cal-event-sub { color: var(--cal-muted); }
+
+/* Scoped calendar-specific utility remaps so page markup requires minimal changes (dark only) */
+html.dark .calendar-root .bg-white { background-color: var(--card-bg) !important; }
+html.dark .calendar-root .bg-slate-50 { background-color: rgba(255,255,255,0.02) !important; }
+html.dark .calendar-root .border-slate-100 { border-color: rgba(255,255,255,0.04) !important; }
+html.dark .calendar-root .text-slate-900 { color: var(--brand-900) !important; }
+html.dark .calendar-root .text-slate-700 { color: var(--muted-700) !important; }
+html.dark .calendar-root .hover\:bg-slate-50:hover { background-color: rgba(255,255,255,0.02) !important; }
+
+/* Additional high-impact utility variants used on the calendar page (dark only) */
+html.dark .calendar-root .bg-white\/95 { background-color: var(--card-bg) !important; }
+html.dark .calendar-root .bg-white\/40 { background-color: rgba(255,255,255,0.04) !important; }
+html.dark .calendar-root .bg-white\/5 { background-color: rgba(255,255,255,0.02) !important; }
+html.dark .calendar-root .bg-slate-50\/50 { background-color: rgba(255,255,255,0.02) !important; }
+html.dark .calendar-root .border-slate-200 { border-color: rgba(255,255,255,0.04) !important; }
+html.dark .calendar-root .border-slate-200\/60 { border-color: rgba(255,255,255,0.04) !important; }
+html.dark .calendar-root .text-slate-800 { color: var(--brand-900) !important; }
+html.dark .calendar-root .text-slate-600 { color: var(--muted-700) !important; }
+html.dark .calendar-root .text-slate-400 { color: rgba(255,255,255,0.6) !important; }
+
+/* Force the calendar page root to use the card surface in dark so the page gradient doesn't show through */
+html.dark .calendar-root { background: var(--card-bg) !important; color: var(--brand-900) !important; }
+
+/* Header and other top bars inside the calendar-root should use card surface in dark */
+html.dark .calendar-root > header,
+html.dark .calendar-root .cozy > .px-4,
+html.dark .calendar-root .px-4.py-3,
+html.dark .calendar-root .bg-gradient-to-r,
+html.dark .calendar-root .bg-gradient-to-br {
+  background: var(--card-bg) !important;
+  border-color: rgba(255,255,255,0.04) !important;
+  color: var(--brand-900) !important;
+}
+
+/* Calendar dark-mode when html.dark is present and we're on the calendar page */
+html.dark .calendar-root .cozy,
+html.dark .calendar-root .cal-card,
+html.dark .calendar-root .group,
+html.dark .calendar-root .cozy .cal-card {
+  background: var(--card-bg) !important;
+  color: var(--brand-900) !important;
+  border-color: rgba(255,255,255,0.04) !important;
+}
+
+html.dark .calendar-root .text-slate-700 { color: var(--muted-600) !important; }
+html.dark .calendar-root .text-slate-900 { color: var(--brand-900) !important; }
+
+
+/* Focus ring for keyboard accessibility */
+.cal-focus-ring:focus { box-shadow: 0 0 0 3px rgba(96,165,250,0.12); border-radius: 6px; }
+
+/* Responsive tweaks */
+@media (max-width: 768px) {
+  .cal-day-cell { min-height: 64px; }
+}
+
+/* Wrapper for month grid to constrain overall height and make grid scrollable when month is tall */
+.calendar-grid-wrapper {
+  /* Fix the wrapper height to available viewport space so the month grid always fits.
+     Rows will equally share this height via grid-auto-rows: 1fr on the inner grid. */
+  height: calc(100vh - 220px);
+  overflow: auto;
+  -webkit-overflow-scrolling: touch;
+}
+.calendar-grid-wrapper .grid { align-items: stretch; grid-auto-rows: 1fr; }
+
+/* Ensure day event containers are compact and don't force the day cell to expand */
+.day-events-container { display: block; }
+.day-events-container .cal-event-pill, .day-events-container > div > * { max-height: 36px; overflow: hidden; }
+
+/* Timetable page dark-mode remaps */
+html.dark .timetable-root { background: var(--card-bg) !important; color: var(--brand-900) !important; }
+html.dark .timetable-root .bg-white { background-color: var(--card-bg) !important; }
+html.dark .timetable-root .bg-slate-50 { background-color: rgba(255,255,255,0.02) !important; }
+html.dark .timetable-root .border { border-color: rgba(255,255,255,0.04) !important; }
+html.dark .timetable-root .text-slate-900 { color: var(--brand-900) !important; }
+html.dark .timetable-root .text-slate-700 { color: var(--muted-700) !important; }
+
+/* Scheduler-specific portal elements often render outside our tree; map their color in dark mode */
+html.dark .mina-scheduler-root, html.dark .mina-scheduler-root * { color: var(--brand-900) !important; }
+html.dark .mina-scheduler-root button, html.dark .mina-scheduler-root .btn, html.dark .mina-scheduler-root .nextui-button, html.dark .mina-scheduler-root [role="button"] { color: #fff !important; }
+html.dark .nextui-portal, html.dark [data-nextui-dialog-backdrop], html.dark [data-nextui-dialog] { color: var(--brand-900) !important; }
