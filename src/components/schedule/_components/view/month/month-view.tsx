@@ -50,13 +50,6 @@ export default function MonthView({
 
   const [currentDate, setCurrentDate] = useState(new Date());
   const [direction, setDirection] = useState<number>(0);
-  const gridRef = React.useRef<HTMLDivElement | null>(null);
-  const [gridHeightPx, setGridHeightPx] = useState<number | null>(null);
-  const computedHeight = useCalendarGridHeight(gridRef);
-
-  React.useEffect(() => {
-    if (computedHeight && computedHeight > 0) setGridHeightPx(computedHeight);
-  }, [computedHeight]);
 
   const daysInMonth = getters.getDaysInMonth(
     currentDate.getMonth(),
@@ -214,22 +207,16 @@ export default function MonthView({
         </div>
       </div>
       <AnimatePresence initial={false} custom={direction} mode="wait">
-  {/* Grid wrapper: constrain height to viewport so long months scroll instead of overflowing */}
-  <div
-    ref={gridRef}
-    className="calendar-grid-wrapper max-w-[1500px] mx-auto mt-6"
-    style={{ height: gridHeightPx ? `${gridHeightPx}px` : undefined }}
-  >
-    <div className="grid grid-cols-7 gap-2 sm:gap-3">
+  <div className="grid grid-cols-7 gap-2 sm:gap-3 mt-6 max-w-[1500px] mx-auto">
           {daysOfWeek.map((day, idx) => (
-            <div key={idx} className="text-left py-3 text-lg tracking-tighter font-medium">
+            <div key={idx} className="text-left py-6 text-2xl tracking-tighter font-medium">
               {day}
             </div>
           ))}
 
           {Array.from({ length: startOffset }).map((_, idx) => (
-            <div key={`offset-${idx}`} className="opacity-50">
-              <div className={clsx("font-semibold relative text-xl mb-1")}>
+            <div key={`offset-${idx}`} className="h-[150px] opacity-50">
+              <div className={clsx("font-semibold relative text-2xl mb-1")}>
                 {lastDateOfPrevMonth - startOffset + idx + 1}
               </div>
             </div>
@@ -241,7 +228,7 @@ export default function MonthView({
             return (
               <div onClick={() => handleAddEvent(dayObj.day)} className="w-full">
                 <div
-                  className="hover:z-50 border-none rounded group flex flex-col h-full"
+                  className="hover:z-50 border-none h-[150px] rounded group flex flex-col"
                   key={dayObj.day}
                 >
                 <Card
@@ -267,10 +254,10 @@ export default function MonthView({
                     {/* spacer above to push the pill down slightly */}
                     <div className="flex-1" />
                     {dayEvents?.length > 0 && (
-                      <div className="w-full max-w-[90%] mt-0 day-events-container" style={{ marginBottom: 6, maxHeight: 36, overflow: 'hidden' }}>
+                      <div className="w-full max-w-[90%] mt-0" style={{ marginBottom: 6 }}>
                         <div className="flex justify-center">
                           <EventStyled
-                            event={{ ...dayEvents[0], CustomEventComponent, minmized: true, compact: true }}
+                            event={{ ...dayEvents[0], CustomEventComponent, minmized: true }}
                             CustomEventModal={CustomEventModal}
                           />
                         </div>
@@ -305,41 +292,9 @@ export default function MonthView({
                 </div>
               </div>
             );
-      })}
+          })}
   </div>
-  </div>
-    </AnimatePresence>
+      </AnimatePresence>
     </div>
   );
-}
-
-// Helper: compute available height for the calendar grid area
-function useCalendarGridHeight(ref: React.RefObject<HTMLElement | null>) {
-  const [h, setH] = React.useState<number | null>(null);
-
-  React.useEffect(() => {
-    function recompute() {
-      try {
-        if (ref && ref.current) {
-          const rect = (ref.current as HTMLElement).getBoundingClientRect();
-          const avail = Math.max(160, window.innerHeight - rect.top - 24); // leave small bottom margin
-          setH(avail);
-          return;
-        }
-      } catch (e) {
-        // fallback below
-      }
-      // fallback: approximate available space
-      const header = document.querySelector('header');
-      const headerHeight = header ? (header as HTMLElement).getBoundingClientRect().height : 100;
-      const topOffset = headerHeight + 120;
-      const avail2 = Math.max(160, window.innerHeight - topOffset);
-      setH(avail2);
-    }
-    recompute();
-    window.addEventListener('resize', recompute);
-    return () => window.removeEventListener('resize', recompute);
-  }, [ref]);
-
-  return h;
 }

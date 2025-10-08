@@ -32,45 +32,7 @@ export async function getServerSideProps(ctx) {
 }
 
 export default function Overview() {
-  // Temporary runtime debugger: measure the two dashboard card widths
-  // and render them on the page for visual diagnosis. Remove when done.
-  function WidthDebugger() {
-    const [leftW, setLeftW] = useState(null);
-    const [rightW, setRightW] = useState(null);
-    const [heroW, setHeroW] = useState(null);
-    useEffect(() => {
-      const id = setTimeout(() => {
-        try {
-          const left = document.querySelector('.dashboard-grid > .agenda-card');
-          const right = document.querySelector('.dashboard-grid > aside.agenda-card');
-          const hero = document.querySelector('.hero-grid');
-          if (left) setLeftW(Math.round(left.getBoundingClientRect().width));
-          if (right) setRightW(Math.round(right.getBoundingClientRect().width));
-          if (hero) setHeroW(Math.round(hero.getBoundingClientRect().width));
-        } catch (e) { /* ignore */ }
-      }, 400);
-      function onResize() {
-        try {
-          const left = document.querySelector('.dashboard-grid > .agenda-card');
-          const right = document.querySelector('.dashboard-grid > aside.agenda-card');
-          const hero = document.querySelector('.hero-grid');
-          if (left) setLeftW(Math.round(left.getBoundingClientRect().width));
-          if (right) setRightW(Math.round(right.getBoundingClientRect().width));
-          if (hero) setHeroW(Math.round(hero.getBoundingClientRect().width));
-        } catch (e) {}
-      }
-      window.addEventListener('resize', onResize);
-      return () => { clearTimeout(id); window.removeEventListener('resize', onResize); };
-    }, []);
-    return (
-      <div style={{ position: 'fixed', right: 14, bottom: 14, zIndex: 9999, background: 'rgba(0,0,0,0.85)', color: '#fff', padding: 12, borderRadius: 8, fontSize: 14 }}>
-        <div style={{ fontWeight: 700, marginBottom: 8 }}>Width debugger</div>
-        <div>Hero: {heroW === null ? '—' : heroW + 'px'}</div>
-        <div>Left card: {leftW === null ? '—' : leftW + 'px'}</div>
-        <div>Right card: {rightW === null ? '—' : rightW + 'px'}</div>
-      </div>
-    );
-  }
+  // ...existing code...
   const [modalOpen, setModalOpen] = useState(false);
   const [modalMode, setModalMode] = useState('quick');
   
@@ -435,7 +397,7 @@ export default function Overview() {
           </div>
         )}
       </Modal>
-      <WidthDebugger />
+  {/* Width debugger removed for production */}
     </div>
   );
 }

@@ -178,6 +178,13 @@ html.dark .form-control {
 	border-color: rgba(255,255,255,0.04) !important;
 }
 
+/* Keep specific selects visually light even in dark mode (closed control surface) */
+html.dark .force-light-select {
+    background: #ffffff !important;
+    color: #0b1220 !important; /* brand dark text */
+    border-color: rgba(0,0,0,0.06) !important;
+}
+
 /* Stronger global dark-mode form & table color mappings to avoid black text
    on native controls and table cells when the html.dark class is present. */
 html.dark input::-webkit-input-placeholder,
@@ -1897,5 +1904,38 @@ html.dark .dashboard-week .week-strip button .week-pill-accent {
 
 
 /* (Removed duplicate dark-mode scoped pill rules to keep a single canonical .week-pill style.) */
+
+
+
+
+/* ----- force-light-select helpers (appended for highest precedence) ----- */
+/* Keep the closed select visually light and inject a custom chevron */
+select.force-light-select {
+	-webkit-appearance: none !important;
+	-moz-appearance: none !important;
+	appearance: none !important;
+	padding-right: 2.5rem !important;
+	background: #ffffff no-repeat right 0.75rem center/1rem url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='20' height='20' viewBox='0 0 24 24' fill='none' stroke='%230b1220' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><polyline points='6 9 12 15 18 9'></polyline></svg>") !important;
+	color: #0b1220 !important;
+	-webkit-text-fill-color: #0b1220 !important;
+	background-clip: padding-box !important;
+	border-color: rgba(0,0,0,0.06) !important;
+}
+
+/* Hide the native dropdown arrow in IE/Edge */
+select.force-light-select::-ms-expand { display: none; }
+select.force-light-select::-ms-clear { display: none; }
+
+/* (background image included above in shorthand) */
+
+/* Keep the white surface even when html.dark rules are applied */
+html.dark select.force-light-select,
+html.dark select.force-light-select:focus {
+	background: #ffffff !important;
+	color: #0b1220 !important;
+	-webkit-text-fill-color: #0b1220 !important;
+	border-color: rgba(0,0,0,0.06) !important;
+	background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='20' height='20' viewBox='0 0 24 24' fill='none' stroke='%230b1220' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><polyline points='6 9 12 15 18 9'></polyline></svg>") !important;
+}
 
 

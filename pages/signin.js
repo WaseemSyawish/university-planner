@@ -27,8 +27,18 @@ export default function SignIn() {
         return;
       }
       if (result.error) {
-        // next-auth sometimes returns a generic error; try to present it
-        setError(typeof result.error === 'string' ? result.error : 'Invalid credentials');
+        // next-auth often returns short error codes (e.g. 'CredentialsSignin').
+        // Map known codes to friendly messages for users while logging details
+        // for diagnostics.
+        const code = typeof result.error === 'string' ? result.error : '';
+        console.warn('[signin] next-auth returned error code', code, result);
+        const friendly = (c) => {
+          if (!c) return 'Invalid credentials';
+          if (c.toLowerCase().includes('credentials')) return 'Invalid email or password';
+          if (c.toLowerCase().includes('csrf')) return 'Security check failed. Try again.';
+          return c;
+        };
+        setError(friendly(code));
         setLoading(false);
         return;
       }

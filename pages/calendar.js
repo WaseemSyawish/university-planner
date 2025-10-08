@@ -462,8 +462,8 @@ export default function CalendarPage() {
               <Calendar className="w-6 h-6 text-white" />
             </div>
             <div>
-              <h1 className="text-xl font-bold text-slate-900">Calendar</h1>
-              <p className="text-xs text-slate-700">Manage your schedule</p>
+              <h1 className="text-xl font-bold text-slate-900 dark:text-slate-100">Calendar</h1>
+              <p className="text-xs text-slate-700 dark:text-slate-300">Manage your schedule</p>
             </div>
           </div>
           <Button onClick={() => { setSelectedDate(toYMD(new Date())); setShowEventModal(true); setSelectedEvent(null); resetForm(); }} className="bg-gradient-to-r from-purple-600 to-purple-700 hover:from-purple-700 hover:to-purple-800 text-white shadow-lg shadow-purple-500/25 transition-all duration-200 hover:shadow-xl hover:shadow-purple-500/35 px-5 h-10 rounded-xl font-medium">
@@ -496,7 +496,7 @@ export default function CalendarPage() {
               <div className="p-3 flex-1 min-h-0 flex flex-col">
                 <div className="grid grid-cols-7 gap-3 mb-3" role="row">
                     {['Sun','Mon','Tue','Wed','Thu','Fri','Sat'].map(d => (
-                    <div key={d} className="text-center text-sm font-semibold uppercase tracking-wider text-slate-700 py-2" role="columnheader">
+                    <div key={d} className="text-center text-sm font-semibold uppercase tracking-wider text-slate-700 dark:text-slate-300 py-2" role="columnheader">
                       {d}
                     </div>
                   ))}
@@ -566,7 +566,7 @@ export default function CalendarPage() {
           <aside className="w-96 mt-4 md:mt-0 md:ml-4 flex-shrink-0">
             <div className="cozy backdrop-blur-xl border border-slate-200/60 rounded-xl p-4 shadow-lg hover:shadow-xl transition-shadow duration-300 max-h-[calc(100vh-120px)] overflow-auto">
               <div className="mb-4">
-                <div className="text-xs font-bold text-slate-700 mb-2">Legend</div>
+                <div className="text-xs font-bold text-slate-700 dark:text-slate-300 mb-2">Legend</div>
                 <div className="flex flex-wrap gap-2 items-center">
                   {[
                     {color:'bg-primary',label:'Class'},
@@ -577,18 +577,18 @@ export default function CalendarPage() {
                   ].map(item => (
                     <div key={item.label} className="flex items-center gap-2 px-2 py-1 bg-slate-50 rounded-md border border-slate-100">
                       <div className={`w-2.5 h-2.5 ${item.color} rounded-full border-2 border-white shadow-sm`} />
-                      <div className="text-xs text-slate-700">{item.label}</div>
+                      <div className="text-xs text-slate-700 dark:text-slate-300">{item.label}</div>
                     </div>
                   ))}
                 </div>
               </div>
               <div className="mb-4">
                   <div className="p-4 cozy rounded-lg border border-slate-100 shadow-sm">
-                  <div className="text-sm text-slate-700">Selected Day</div>
-                  <div className="text-lg font-bold text-slate-900 mt-1">
+                  <div className="text-sm text-slate-700 dark:text-slate-300">Selected Day</div>
+                  <div className="text-lg font-bold text-slate-900 dark:text-slate-100 mt-1">
                     {selectedDate ? (() => { const [y,m,d] = selectedDate.split('-'); return new Date(Number(y), Number(m)-1, Number(d)).toLocaleDateString(undefined, { weekday: 'long', year: 'numeric', month: 'short', day: 'numeric' }); })() : 'Select a date'}
                   </div>
-                  <div className="mt-3 text-sm text-slate-600">{(() => { const evs = getEventsForDate(selectedDate||''); return evs.length ? `${evs.length} event${evs.length>1?'s':''}` : 'No events'; })()}</div>
+                  <div className="mt-3 text-sm text-slate-600 dark:text-slate-300">{(() => { const evs = getEventsForDate(selectedDate||''); return evs.length ? `${evs.length} event${evs.length>1?'s':''}` : 'No events'; })()}</div>
                 </div>
               </div>
               <div className="flex items-end justify-between mb-2">
@@ -620,7 +620,7 @@ export default function CalendarPage() {
                           </div>
                         )}
                         {evs.length === 0 && !hol ? (
-                            <div className="text-center py-10 text-slate-700">
+                            <div className="text-center py-10 text-slate-700 dark:text-slate-300">
                             <Calendar className="w-10 h-10 mx-auto mb-3 text-slate-300" />
                             <p className="text-sm font-medium">No events scheduled</p>
                             <p className="text-xs mt-1">Click + to add one</p>
@@ -632,8 +632,8 @@ export default function CalendarPage() {
                               <div className="flex items-start gap-2 min-w-0 flex-1">
                                 <div className={`w-3 h-3 ${ev.color} rounded-full border-2 border-white shadow-sm mt-0.5 flex-shrink-0`}></div>
                                 <div className="min-w-0 flex-1">
-                                  <div className="text-sm font-bold text-slate-900 truncate">{ev.title}</div>
-                                  <div className="text-xs text-slate-600 mt-1 flex items-center gap-1">
+                                  <div className="text-sm font-bold text-slate-900 dark:text-slate-100 truncate">{ev.title}</div>
+                                  <div className="text-xs text-slate-600 dark:text-slate-300 mt-1 flex items-center gap-1">
                                     {ev.startTime && <span className="font-medium">{ev.startTime}</span>}
                                     {ev.endTime && <span> - {ev.endTime}</span>}
                                   </div>
@@ -669,13 +669,13 @@ export default function CalendarPage() {
                         ))}
                             {evs.length > 0 && (
                           <div className="pt-3 mt-3 border-t-2 border-slate-100">
-                            <h5 className="text-xs font-bold text-slate-700 uppercase tracking-wider mb-2">Upcoming Events</h5>
+                            <h5 className="text-xs font-bold text-slate-700 dark:text-slate-300 uppercase tracking-wider mb-2">Upcoming Events</h5>
                             <div className="space-y-2">
                               {events.filter(e => toYMD(e.date) >= toYMD(selectedDate)).slice(0,3).map(u => (
                                 <div key={`up-${u.id}`} className="flex items-center gap-2 text-xs p-2 bg-slate-50 rounded-md hover:bg-blue-50 transition-colors">
                                   <div className={`w-2 h-2 ${u.color} rounded-full flex-shrink-0`}></div>
-                                  <span className="font-medium text-slate-900 truncate flex-1">{u.title}</span>
-                                  <span className="text-slate-700 text-xs">{(() => { const [yy,mm,dd] = toYMD(u.date).split('-'); return `${Number(dd)}/${Number(mm)}` })()}</span>
+                                  <span className="font-medium text-slate-900 dark:text-slate-100 truncate flex-1">{u.title}</span>
+                                  <span className="text-slate-700 dark:text-slate-300 text-xs">{(() => { const [yy,mm,dd] = toYMD(u.date).split('-'); return `${Number(dd)}/${Number(mm)}` })()}</span>
                                 </div>
                               ))}
                             </div>
@@ -720,7 +720,7 @@ export default function CalendarPage() {
           {/* Scrollable body */}
           <div className="p-5 overflow-y-auto hide-scrollbar flex-1 space-y-5">
             <div className="space-y-2">
-              <Label htmlFor="title" className="text-sm font-bold text-slate-800 flex items-center gap-2">
+              <Label htmlFor="title" className="text-sm font-bold text-slate-800 dark:text-slate-100 flex items-center gap-2">
                 Event Title <span className="text-red-500">*</span>
               </Label>
                 <Input 
@@ -735,7 +735,7 @@ export default function CalendarPage() {
 
             <div className="grid grid-cols-2 gap-4">
               <div className="space-y-2">
-                <Label htmlFor="date" className="text-sm font-bold text-slate-800 flex items-center gap-2">
+                <Label htmlFor="date" className="text-sm font-bold text-slate-800 dark:text-slate-100 flex items-center gap-2">
                   Date <span className="text-red-500">*</span>
                 </Label>
                 <Input 
@@ -747,7 +747,7 @@ export default function CalendarPage() {
                 />
               </div>
               <div className="space-y-2">
-                <Label htmlFor="type" className="text-sm font-bold text-slate-800">Event Type</Label>
+                <Label htmlFor="type" className="text-sm font-bold text-slate-800 dark:text-slate-100">Event Type</Label>
                 <select
                   id="type"
                   value={newEvent.type}
@@ -764,7 +764,7 @@ export default function CalendarPage() {
 
             <div className="grid grid-cols-2 gap-4">
               <div className="space-y-2">
-                <Label htmlFor="startTime" className="text-sm font-bold text-slate-800">Start Time</Label>
+                <Label htmlFor="startTime" className="text-sm font-bold text-slate-800 dark:text-slate-100">Start Time</Label>
                 <Input 
                   id="startTime" 
                   type="time" 
@@ -774,7 +774,7 @@ export default function CalendarPage() {
                 />
               </div>
               <div className="space-y-2">
-                <Label htmlFor="endTime" className="text-sm font-bold text-slate-800">End Time</Label>
+                <Label htmlFor="endTime" className="text-sm font-bold text-slate-800 dark:text-slate-100">End Time</Label>
                 <Input 
                   id="endTime" 
                   type="time" 
@@ -786,7 +786,7 @@ export default function CalendarPage() {
             </div>
 
             <div className="space-y-2">
-              <Label htmlFor="location" className="text-sm font-bold text-slate-800">Location</Label>
+              <Label htmlFor="location" className="text-sm font-bold text-slate-800 dark:text-slate-100">Location</Label>
               <Input 
                 id="location" 
                 type="text" 
@@ -798,7 +798,7 @@ export default function CalendarPage() {
             </div>
 
             <div className="space-y-2">
-              <Label className="text-sm font-bold text-slate-800 block">
+              <Label className="text-sm font-bold text-slate-800 dark:text-slate-100 block">
                 Color Theme
               </Label>
               <div className="flex gap-2 flex-wrap">
@@ -819,7 +819,7 @@ export default function CalendarPage() {
             </div>
 
             <div className="space-y-2">
-              <Label htmlFor="description" className="text-sm font-bold text-slate-800">
+              <Label htmlFor="description" className="text-sm font-bold text-slate-800 dark:text-slate-100">
                 Description
               </Label>
               <Textarea
@@ -874,6 +874,13 @@ export default function CalendarPage() {
         .calendar-root .text-slate-600 { color: #475569 !important; }
         .calendar-root .text-slate-500 { color: #64748b !important; }
         .calendar-root .text-slate-400 { color: #94a3b8 !important; }
+        /* Dark-mode overrides: when html has .dark, ensure calendar text becomes light */
+        :global(html.dark) .calendar-root .text-slate-900 { color: rgba(255,255,255,0.95) !important; }
+        :global(html.dark) .calendar-root .text-slate-800 { color: rgba(255,255,255,0.9) !important; }
+        :global(html.dark) .calendar-root .text-slate-700 { color: rgba(255,255,255,0.82) !important; }
+        :global(html.dark) .calendar-root .text-slate-600 { color: rgba(255,255,255,0.7) !important; }
+        :global(html.dark) .calendar-root .text-slate-500 { color: rgba(255,255,255,0.6) !important; }
+        :global(html.dark) .calendar-root .text-slate-400 { color: rgba(255,255,255,0.5) !important; }
         
         /* Fix calendar grid cell alignment */
         .calendar-root [role="gridcell"] {

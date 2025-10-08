@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+require('dotenv').config();
 const readline = require('readline');
 const bcrypt = require('bcryptjs');
 const prisma = require('../lib/prisma');

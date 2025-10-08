@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import CustomSelect from '../src/components/CustomSelect';
 import { GraduationCap, TrendingUp, Award, BookOpen, Plus, Trash2, Edit2, X, ChevronDown, ChevronUp } from 'lucide-react';
 
 const GradesPage = () => {
@@ -72,11 +73,12 @@ const GradesPage = () => {
   });
 
   const getGradeBgColor = (grade) => {
-    if (grade.startsWith('A')) return 'bg-green-100 text-green-800';
-    if (grade.startsWith('B')) return 'bg-blue-100 text-blue-800';
-    if (grade.startsWith('C')) return 'bg-yellow-100 text-yellow-800';
-    if (grade.startsWith('D')) return 'bg-orange-100 text-orange-800';
-    return 'bg-red-100 text-red-800';
+    // return Tailwind classes with sensible dark-mode fallbacks
+    if (grade.startsWith('A')) return 'bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-300';
+    if (grade.startsWith('B')) return 'bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-300';
+    if (grade.startsWith('C')) return 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900 dark:text-yellow-300';
+    if (grade.startsWith('D')) return 'bg-orange-100 text-orange-800 dark:bg-orange-900 dark:text-orange-300';
+    return 'bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-300';
   };
 
   const getCategoryIcon = (type) => {
@@ -311,9 +313,9 @@ const GradesPage = () => {
   }, []);
 
   return (
-    <div className="min-h-screen bg-gray-50">
+    <div className="min-h-screen relative z-10 text-slate-900 dark:text-slate-100 dark:bg-[#071023]">
       {/* Hero Section */}
-      <div className="bg-gradient-to-r from-purple-600 to-purple-800 text-white px-8 py-12">
+      <div className="bg-gradient-to-r from-purple-600 to-purple-800 text-white px-8 py-12 dark:from-[#2a1b4d] dark:to-[#07203a]">
         <div className="max-w-7xl mx-auto">
           <div className="flex items-center gap-4">
             <GraduationCap className="w-12 h-12" />
@@ -328,11 +330,11 @@ const GradesPage = () => {
       <div className="max-w-7xl mx-auto px-8 py-8">
         {/* Stats Cards */}
   <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 mb-8">
-          <div className="bg-white rounded-xl shadow-lg p-6 border border-gray-100">
+          <div className="bg-white rounded-xl shadow-lg p-6 border border-gray-100 dark:bg-[#071423] dark:border-transparent">
             <div className="flex items-center justify-between">
               <div>
-                <p className="text-sm text-gray-600 font-medium">Current GPA</p>
-                <h3 className="text-4xl font-bold text-purple-600 mt-2">{stats.gpa}</h3>
+                <p className="text-sm text-gray-600 font-medium dark:text-slate-300">Current GPA</p>
+                <h3 className="text-4xl font-bold text-purple-600 mt-2 dark:text-purple-300">{stats.gpa}</h3>
               </div>
               <div className="p-3 bg-purple-100 rounded-lg">
                 <TrendingUp className="w-6 h-6 text-purple-600" />
@@ -340,11 +342,11 @@ const GradesPage = () => {
             </div>
           </div>
 
-          <div className="bg-white rounded-xl shadow-lg p-6 border border-gray-100">
+          <div className="bg-white rounded-xl shadow-lg p-6 border border-gray-100 dark:bg-[#071423] dark:border-transparent">
             <div className="flex items-center justify-between">
               <div>
-                <p className="text-sm text-gray-600 font-medium">Total Credits</p>
-                <h3 className="text-4xl font-bold text-gray-900 mt-2">{stats.credits}</h3>
+                <p className="text-sm text-gray-600 font-medium dark:text-slate-300">Total Credits</p>
+                <h3 className="text-4xl font-bold text-slate-800 dark:text-slate-100 mt-2">{stats.credits}</h3>
               </div>
               <div className="p-3 bg-blue-100 rounded-lg">
                 <BookOpen className="w-6 h-6 text-blue-600" />
@@ -354,11 +356,11 @@ const GradesPage = () => {
 
           {/* Courses Completed card removed - space redistributed among remaining cards */}
 
-          <div className="bg-white rounded-xl shadow-lg p-6 border border-gray-100">
+          <div className="bg-white rounded-xl shadow-lg p-6 border border-gray-100 dark:bg-[#071423] dark:border-transparent">
             <div className="flex items-center justify-between">
               <div>
-                <p className="text-sm text-gray-600 font-medium">Average Grade</p>
-                <h3 className="text-4xl font-bold text-gray-900 mt-2">{stats.avgGrade}</h3>
+                <p className="text-sm text-gray-600 font-medium dark:text-slate-300">Average Grade</p>
+                <h3 className="text-4xl font-bold text-slate-800 dark:text-slate-100 mt-2">{stats.avgGrade}</h3>
               </div>
               <div className="p-3 bg-amber-100 rounded-lg">
                 <GraduationCap className="w-6 h-6 text-amber-600" />
@@ -369,38 +371,39 @@ const GradesPage = () => {
 
         {/* Filter Section */}
         <div className="flex items-center gap-4 mb-6">
-          <select 
-            className="px-4 py-2 border-2 border-purple-600 rounded-lg text-gray-900 font-medium focus:outline-none focus:ring-2 focus:ring-purple-600"
-            value={selectedSemester}
-            onChange={(e) => setSelectedSemester(e.target.value)}
-          >
-            {semesters.map(sem => (
-              <option key={sem.value} value={sem.value}>{sem.label}</option>
-            ))}
-          </select>
+          <div className="w-64">
+            <CustomSelect
+              options={semesters}
+              value={selectedSemester}
+              onChange={(v) => setSelectedSemester(v)}
+              placeholder="Select semester"
+              className="w-full"
+              id="grades-semester-select"
+            />
+          </div>
 
           {/* Course filter - lets user restrict view to a single module */}
-          <select
-            className="px-4 py-2 border-2 border-gray-300 rounded-lg text-gray-700 font-medium focus:outline-none focus:ring-2 focus:ring-gray-300"
-            value={filterCourseId}
-            onChange={(e) => setFilterCourseId(e.target.value)}
-          >
-            <option value="all">All courses</option>
-            {courses.map(c => (
-              <option key={c.id} value={c.id}>{c.name}{c.code ? ` (${c.code})` : ''}</option>
-            ))}
-          </select>
-          <div className="text-sm text-gray-600">
+          <div className="w-96">
+            <CustomSelect
+              options={[{ value: 'all', label: 'All courses' }, ...courses.map(c => ({ value: String(c.id), label: `${c.name}${c.code ? ` (${c.code})` : ''}` }))]}
+              value={String(filterCourseId)}
+              onChange={(v) => setFilterCourseId(v)}
+              placeholder="All courses"
+              className="w-full"
+              id="grades-course-select"
+            />
+          </div>
+          <div className="text-sm text-gray-600 dark:text-slate-300">
             Showing {filteredCourses.length} course{filteredCourses.length !== 1 ? 's' : ''}
           </div>
         </div>
 
         {/* Debug panel (visible when ?debug=1 in URL) */}
         {showDebug && (
-          <div className="mt-6 p-4 bg-white border rounded-lg text-xs">
-            <h4 className="font-semibold mb-2">Debug: courses / semesters / stats</h4>
+          <div className="mt-6 p-4 bg-white border rounded-lg text-xs dark:bg-[#071423] dark:border-transparent">
+            <h4 className="font-semibold mb-2 dark:text-slate-100">Debug: courses / semesters / stats</h4>
             <div style={{ maxHeight: 300, overflow: 'auto' }}>
-              <pre className="whitespace-pre-wrap">{JSON.stringify({ courses, semesters, stats, filteredCoursesLength: filteredCourses.length }, null, 2)}</pre>
+              <pre className="whitespace-pre-wrap dark:text-slate-200">{JSON.stringify({ courses, semesters, stats, filteredCoursesLength: filteredCourses.length }, null, 2)}</pre>
             </div>
           </div>
         )}
@@ -412,11 +415,11 @@ const GradesPage = () => {
             const totalWeight = course.categories.reduce((sum, cat) => sum + cat.weight, 0);
 
             return (
-              <div key={course.id} className="bg-white rounded-xl shadow-lg p-6 border border-gray-100">
+              <div key={course.id} className="bg-white rounded-xl shadow-lg p-6 border border-gray-100 dark:bg-[#071423] dark:border-transparent">
                 <div className="flex justify-between items-start mb-4">
                   <div>
                     <p className="text-sm font-semibold text-purple-600">{course.code}</p>
-                    <h3 className="text-2xl font-bold text-gray-900 mt-1">{course.name}</h3>
+                    <h3 className="text-2xl font-bold text-slate-100 dark:text-gray-900 mt-1">{course.name}</h3>
                     <p className="text-sm text-gray-600 mt-1">{course.credits} Credits • {course.categories.length} Categories</p>
                   </div>
                   <div className={`px-6 py-3 rounded-lg text-xl font-bold ${getGradeBgColor(grade)}`}>
@@ -431,7 +434,7 @@ const GradesPage = () => {
                       {totalWeight}% / 100%
                     </span>
                   </div>
-                  <div className="w-full bg-gray-200 rounded-full h-2">
+                      <div className="w-full bg-gray-200 rounded-full h-2">
                     <div 
                       className={`h-2 rounded-full transition-all duration-500 ${totalWeight === 100 ? 'bg-green-600' : 'bg-orange-500'}`}
                       style={{ width: `${Math.min(totalWeight, 100)}%` }}
@@ -442,10 +445,10 @@ const GradesPage = () => {
                 <div className="border-t border-gray-200 my-4"></div>
 
                 <div className="flex justify-between items-center mb-3">
-                  <h4 className="font-semibold text-gray-900">Grading Categories</h4>
-                  <button 
+                  <h4 className="font-semibold text-slate-100 dark:text-gray-900">Grading Categories</h4>
+          <button 
                     onClick={() => openCategoryModal(course)}
-                    className="flex items-center gap-2 px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition-colors text-sm font-medium"
+            className="flex items-center gap-2 px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition-colors text-sm font-medium"
                   >
                     <Plus className="w-4 h-4" />
                     Add Category
@@ -458,17 +461,17 @@ const GradesPage = () => {
                     const isExpanded = expandedCategories[`${course.id}-${category.id}`];
 
                     return (
-                      <div key={category.id} className="border border-gray-200 rounded-lg overflow-hidden">
-                        <div className="bg-gray-50 p-4">
+                      <div key={category.id} className="border border-gray-200 rounded-lg overflow-hidden dark:border-transparent">
+                        <div className="bg-white p-4 dark:bg-[#071423]">
                           <div className="flex items-center justify-between">
                             <div className="flex items-center gap-3 flex-1">
                               <span className="text-2xl">{getCategoryIcon(category.type)}</span>
                               <div className="flex-1">
                                 <div className="flex items-center gap-2">
-                                  <h5 className="font-semibold text-gray-900">{category.name}</h5>
-                                  <span className="text-sm text-gray-600">({category.weight}%)</span>
+                                  <h5 className="font-semibold text-slate-100 dark:text-gray-900">{category.name}</h5>
+                                  <span className="text-sm text-gray-600 dark:text-slate-300">({category.weight}%)</span>
                                 </div>
-                                <p className="text-sm text-gray-600">
+                                <p className="text-sm text-gray-600 dark:text-slate-300">
                                   {category.items.length} item{category.items.length !== 1 ? 's' : ''} • Average: {categoryAvg.toFixed(1)}%
                                 </p>
                               </div>
@@ -476,19 +479,19 @@ const GradesPage = () => {
                             <div className="flex items-center gap-2">
                               <button
                                 onClick={() => openItemModal(course, category)}
-                                className="px-3 py-1 bg-purple-100 text-purple-700 rounded hover:bg-purple-200 transition-colors text-sm font-medium"
+                                className="px-3 py-1 bg-purple-100 text-purple-700 rounded hover:bg-purple-200 transition-colors text-sm font-medium dark:bg-purple-800 dark:text-purple-200 dark:hover:bg-purple-700"
                               >
                                 + Add Item
                               </button>
                               <button
                                 onClick={() => toggleCategory(course.id, category.id)}
-                                className="p-2 hover:bg-gray-200 rounded transition-colors"
+                                className="p-2 hover:bg-gray-200 rounded transition-colors dark:hover:bg-[#061422]"
                               >
                                 {isExpanded ? <ChevronUp className="w-5 h-5" /> : <ChevronDown className="w-5 h-5" />}
                               </button>
                               <button
                                 onClick={() => handleDeleteCategory(course.id, category.id)}
-                                className="p-2 text-red-600 hover:bg-red-50 rounded transition-colors"
+                                className="p-2 text-red-600 hover:bg-red-50 rounded transition-colors dark:hover:bg-red-900/20"
                               >
                                 <Trash2 className="w-4 h-4" />
                               </button>
@@ -501,18 +504,18 @@ const GradesPage = () => {
                             {category.items.map(item => {
                               const itemPercentage = (item.score / item.maxScore * 100).toFixed(1);
                               return (
-                                <div key={item.id} className="flex items-center justify-between p-3 bg-white border border-gray-200 rounded-lg">
+                                <div key={item.id} className="flex items-center justify-between p-3 bg-white border border-gray-200 rounded-lg dark:bg-[#061422] dark:border-transparent">
                                   <div className="flex-1">
-                                    <p className="font-medium text-gray-900">{item.name}</p>
-                                    <p className="text-sm text-gray-600">{item.score} / {item.maxScore} points</p>
+                                    <p className="font-medium text-slate-100 dark:text-gray-900">{item.name}</p>
+                                    <p className="text-sm text-gray-600 dark:text-slate-300">{item.score} / {item.maxScore} points</p>
                                   </div>
                                   <div className="flex items-center gap-3">
                                     <div className="text-right">
-                                      <p className="font-bold text-lg text-gray-900">{itemPercentage}%</p>
+                                      <p className="font-bold text-lg text-slate-100 dark:text-gray-900">{itemPercentage}%</p>
                                     </div>
                                     <button
                                       onClick={() => handleDeleteItem(course.id, category.id, item.id)}
-                                      className="p-1 text-red-600 hover:bg-red-50 rounded transition-colors"
+                                      className="p-1 text-red-600 hover:bg-red-50 rounded transition-colors dark:hover:bg-red-900/20"
                                     >
                                       <Trash2 className="w-4 h-4" />
                                     </button>
@@ -521,7 +524,7 @@ const GradesPage = () => {
                               );
                             })}
                             {category.items.length === 0 && (
-                              <div className="text-center py-6 text-gray-500">
+                              <div className="text-center py-6 text-gray-500 dark:text-slate-300">
                                 <p className="text-sm">No items yet. Click "Add Item" to get started!</p>
                               </div>
                             )}
@@ -532,7 +535,7 @@ const GradesPage = () => {
                   })}
 
                   {course.categories.length === 0 && (
-                    <div className="text-center py-8 text-gray-500">
+                    <div className="text-center py-8 text-gray-500 dark:text-slate-300">
                       <BookOpen className="w-12 h-12 mx-auto mb-2 opacity-30" />
                       <p>No categories yet. Add a grading category to get started!</p>
                     </div>
@@ -547,12 +550,12 @@ const GradesPage = () => {
       {/* Add Category Modal */}
       {showCategoryModal && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-xl shadow-2xl max-w-md w-full p-6">
+          <div className="bg-white rounded-xl shadow-2xl max-w-md w-full p-6 dark:bg-[#071423]">
             <div className="flex justify-between items-center mb-6">
-              <h3 className="text-2xl font-bold text-gray-900">Add Grading Category</h3>
+              <h3 className="text-2xl font-bold text-slate-100 dark:text-gray-900">Add Grading Category</h3>
               <button 
                 onClick={() => setShowCategoryModal(false)}
-                className="p-1 hover:bg-gray-100 rounded transition-colors"
+                className="p-1 hover:bg-gray-100 rounded transition-colors dark:hover:bg-[#061422]"
               >
                 <X className="w-6 h-6" />
               </button>
@@ -560,20 +563,20 @@ const GradesPage = () => {
 
             <div className="space-y-4">
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">Category Name</label>
+                <label className="block text-sm font-medium text-gray-700 dark:text-slate-300 mb-2">Category Name</label>
                 <input
                   type="text"
                   placeholder="e.g., Quizzes, Assignments, Midterm"
-                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-600"
+                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-600 bg-white dark:bg-[#071423] dark:border-gray-700 dark:text-slate-200 text-gray-900"
                   value={newCategory.name}
                   onChange={(e) => setNewCategory({...newCategory, name: e.target.value})}
                 />
               </div>
 
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">Type</label>
+                <label className="block text-sm font-medium text-gray-700 dark:text-slate-300 mb-2">Type</label>
                 <select
-                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-600"
+                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-600 bg-white dark:bg-[#071423] dark:border-gray-700 dark:text-slate-200 text-gray-900"
                   value={newCategory.type}
                   onChange={(e) => setNewCategory({...newCategory, type: e.target.value})}
                 >
@@ -588,21 +591,21 @@ const GradesPage = () => {
               </div>
 
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">Weight (%)</label>
+                <label className="block text-sm font-medium text-gray-700 dark:text-slate-300 mb-2">Weight (%)</label>
                 <input
                   type="number"
                   placeholder="20"
                   min="0"
                   max="100"
-                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-600"
+                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-600 bg-white dark:bg-[#071423] dark:border-gray-700 dark:text-slate-200 text-gray-900"
                   value={newCategory.weight}
                   onChange={(e) => setNewCategory({...newCategory, weight: e.target.value})}
                 />
-                <p className="text-xs text-gray-500 mt-1">How much this category counts toward the final grade</p>
+                <p className="text-xs text-gray-500 dark:text-slate-300 mt-1">How much this category counts toward the final grade</p>
               </div>
 
-              <div className="bg-purple-50 border border-purple-200 rounded-lg p-3">
-                <p className="text-sm text-gray-700">
+              <div className="bg-purple-50 border border-purple-200 rounded-lg p-3 dark:bg-purple-900 dark:border-transparent">
+                <p className="text-sm text-gray-700 dark:text-slate-200">
                   <span className="font-medium">Course:</span> {selectedCourse.code} - {selectedCourse.name}
                 </p>
               </div>
@@ -611,7 +614,7 @@ const GradesPage = () => {
             <div className="flex gap-3 mt-6">
               <button
                 onClick={() => setShowCategoryModal(false)}
-                className="flex-1 px-4 py-2 border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-50 transition-colors font-medium"
+                className="flex-1 px-4 py-2 border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-50 transition-colors font-medium bg-white dark:bg-[#071423] dark:border-gray-700 dark:text-slate-200 dark:hover:bg-[#061422]"
               >
                 Cancel
               </button>
@@ -629,12 +632,12 @@ const GradesPage = () => {
       {/* Add Item Modal */}
       {showItemModal && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-xl shadow-2xl max-w-md w-full p-6">
+          <div className="bg-white rounded-xl shadow-2xl max-w-md w-full p-6 dark:bg-[#071423]">
             <div className="flex justify-between items-center mb-6">
-              <h3 className="text-2xl font-bold text-gray-900">Add Item</h3>
+              <h3 className="text-2xl font-bold text-slate-100 dark:text-gray-900">Add Item</h3>
               <button 
                 onClick={() => setShowItemModal(false)}
-                className="p-1 hover:bg-gray-100 rounded transition-colors"
+                className="p-1 hover:bg-gray-100 rounded transition-colors dark:hover:bg-[#061422]"
               >
                 <X className="w-6 h-6" />
               </button>
@@ -642,11 +645,11 @@ const GradesPage = () => {
 
             <div className="space-y-4">
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">Item Name</label>
+                <label className="block text-sm font-medium text-gray-700 dark:text-slate-300 mb-2">Item Name</label>
                 <input
                   type="text"
                   placeholder="e.g., Quiz 1, Assignment 3, Midterm"
-                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-600"
+                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-600 dark:bg-[#071423] dark:border-gray-700 dark:text-slate-200"
                   value={newItem.name}
                   onChange={(e) => setNewItem({...newItem, name: e.target.value})}
                 />
@@ -654,35 +657,35 @@ const GradesPage = () => {
 
               <div className="grid grid-cols-2 gap-4">
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">Score Earned</label>
+                  <label className="block text-sm font-medium text-gray-700 dark:text-slate-300 mb-2">Score Earned</label>
                   <input
                     type="number"
                     placeholder="85"
                     min="0"
-                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-600"
+                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-600 dark:bg-[#071423] dark:border-gray-700 dark:text-slate-200"
                     value={newItem.score}
                     onChange={(e) => setNewItem({...newItem, score: e.target.value})}
                   />
                 </div>
 
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">Max Score</label>
+                  <label className="block text-sm font-medium text-gray-700 dark:text-slate-300 mb-2">Max Score</label>
                   <input
                     type="number"
                     placeholder="100"
                     min="0"
-                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-600"
+                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-600 dark:bg-[#071423] dark:border-gray-700 dark:text-slate-200"
                     value={newItem.maxScore}
                     onChange={(e) => setNewItem({...newItem, maxScore: e.target.value})}
                   />
                 </div>
               </div>
 
-              <div className="bg-purple-50 border border-purple-200 rounded-lg p-3">
-                <p className="text-sm text-gray-700">
+              <div className="bg-purple-50 border border-purple-200 rounded-lg p-3 dark:bg-purple-900 dark:border-transparent">
+                <p className="text-sm text-gray-700 dark:text-slate-200">
                   <span className="font-medium">Adding to:</span> {selectedCategory.name} ({selectedCategory.weight}%)
                 </p>
-                <p className="text-sm text-gray-700 mt-1">
+                <p className="text-sm text-gray-700 mt-1 dark:text-slate-200">
                   <span className="font-medium">Course:</span> {selectedCourse.code}
                 </p>
               </div>
@@ -691,7 +694,7 @@ const GradesPage = () => {
             <div className="flex gap-3 mt-6">
               <button
                 onClick={() => setShowItemModal(false)}
-                className="flex-1 px-4 py-2 border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-50 transition-colors font-medium"
+                className="flex-1 px-4 py-2 border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-50 transition-colors font-medium dark:bg-[#071423] dark:border-gray-700 dark:text-slate-200 dark:hover:bg-[#061422]"
               >
                 Cancel
               </button>

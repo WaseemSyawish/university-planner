@@ -10,6 +10,9 @@ datasource db {
 model User {
   id                  String              @id @default(uuid())
   email               String              @unique
+  // JSON blob for user preferences (theme, weekStartsOn, defaultView, etc.)
+  settings            Json?
+  password_hash       String?
   name                String?
   created_at          DateTime?           @default(now())
   updated_at          DateTime?           @default(now())
@@ -83,6 +86,7 @@ model Event {
 
   courses Course? @relation(fields: [course_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
   users   User    @relation(fields: [user_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  attachments Attachment[]
 
   @@index([date], map: "idx_events_date")
   @@index([user_id], map: "idx_events_user")
@@ -110,4 +114,18 @@ model ArchivedEvent {
   @@index([date], map: "idx_archived_events_date")
   @@index([user_id], map: "idx_archived_events_user")
   @@map("archived_events")
+}
+
+model Attachment {
+  id         String   @id @default(uuid())
+  filename   String
+  path       String
+  mime       String?
+  size       Int?
+  event_id   String
+  created_at DateTime? @default(now())
+
+  event Event @relation(fields: [event_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@map("attachments")
 }

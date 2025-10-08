@@ -172,7 +172,11 @@ export default function EventStyled({
 
   // Restore timetable (non-compact) visuals: full height, larger paddings and radii
   const containerClass = cn(
-    'w-full z-50 relative cursor-pointer group overflow-hidden transition-shadow duration-200',
+    'w-full z-50 relative cursor-pointer group transition-shadow duration-200',
+    // Avoid overflow clipping for minimized timeline items so the inner surface
+    // can stretch to the parent's computed pixel height. Keep overflow-hidden
+    // only for non-minimized (card) variants.
+    !event?.minmized && 'overflow-hidden',
     // non-compact should fill its slot (timetable)
     !isCompact ? 'h-full' : '',
     // rounding: timetable defaults to larger rounded shapes, compact (calendar) uses smaller
@@ -250,7 +254,15 @@ export default function EventStyled({
           {/* Main card surface (full-color) */}
           <div
             className={cn(`${bodyPadding} min-h-0 ${!isCompact ? 'h-full' : ''} ${bodyRadius} ${surfaceBgClass} ${surfaceTextClass}`)}
-            style={{ ...(bgInlineStyle || {}), boxShadow: isCompact ? (event?.minmized ? '0 2px 6px rgba(2,6,23,0.04)' : '0 4px 8px rgba(2,6,23,0.06)') : (event?.minmized ? '0 6px 12px rgba(2,6,23,0.04)' : '0 6px 18px rgba(2,6,23,0.06)') }}
+            style={{
+              ...(bgInlineStyle || {}),
+              // Explicitly force the colored surface to match the parent's computed
+              // pixel height for minimized timeline items. This prevents a visual
+              // gap where the clickable area extends but the background does not.
+              height: event?.minmized && !isCompact ? '100%' : undefined,
+              minHeight: 0,
+              boxShadow: isCompact ? (event?.minmized ? '0 2px 6px rgba(2,6,23,0.04)' : '0 4px 8px rgba(2,6,23,0.06)') : (event?.minmized ? '0 6px 12px rgba(2,6,23,0.04)' : '0 6px 18px rgba(2,6,23,0.06)')
+            }}
           >
             {event?.minmized ? (
               <div className="flex items-center gap-3">

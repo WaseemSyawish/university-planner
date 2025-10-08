@@ -75,23 +75,50 @@ model Event {
   id          String    @id @default(uuid())
   title       String
   type        String    @default("assignment")
+  // human-friendly location/room text (kept separate from description)
+  location    String?
   archived    Boolean   @default(false)
   course_id   String?
+  template_id String?
   date        DateTime
   time        String?
+  end_date    DateTime?
   description String?
+  // optional JSON blob for UI metadata (color/variant/durationMinutes etc.)
+  meta        Json?
   completed   Boolean   @default(false)
   user_id     String
   created_at  DateTime? @default(now())
   updated_at  DateTime? @default(now())
 
   courses Course? @relation(fields: [course_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  eventTemplate EventTemplate? @relation(fields: [template_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
   users   User    @relation(fields: [user_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
   attachments Attachment[]
 
   @@index([date], map: "idx_events_date")
   @@index([user_id], map: "idx_events_user")
   @@map("events")
+}
+
+model EventTemplate {
+  id          String    @id @default(uuid())
+  title       String
+  course_id   String?
+  repeat_option String?
+  start_date  DateTime?
+  // payload is a JSON blob storing timetable template details such as
+  // an array of module definitions (room, time, duration, periods, etc.)
+  // This allows a template to represent multiple modules without
+  // materializing them as Event rows until the user chooses to apply it.
+  payload     Json?
+  user_id     String
+  created_at  DateTime? @default(now())
+  updated_at  DateTime? @default(now())
+
+  events  Event[]
+
+  @@map("event_templates")
 }
 
 model ArchivedEvent {
@@ -101,9 +128,13 @@ model ArchivedEvent {
   type              String    @default("assignment")
   archived          Boolean   @default(true)
   course_id         String?
+  // preserved location/room when archiving
+  location          String?
   date              DateTime
   time              String?
   description       String?
+  // optional JSON blob for UI metadata (color/variant/durationMinutes etc.)
+  meta              Json?
   completed         Boolean   @default(false)
   user_id           String
   created_at        DateTime? @default(now())

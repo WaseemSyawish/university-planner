@@ -262,8 +262,14 @@ export default function DailyView({
       const widthPercent = 100 / totalCols;
       const leftPercent = colIndex * widthPercent;
 
-      const topPx = (thisStartMin / 60) * ROW_PX_PER_HOUR;
-      const heightPx = Math.max(20, (thisDuration / 60) * ROW_PX_PER_HOUR);
+  // Round/ceil pixel values to avoid subpixel gaps caused by fractional
+  // computations and different device pixel ratios. Add a 1px buffer to
+  // height to ensure the colored surface reaches the grid line below.
+  const rawTop = (thisStartMin / 60) * ROW_PX_PER_HOUR;
+  const rawHeight = (thisDuration / 60) * ROW_PX_PER_HOUR;
+  const topPx = Math.max(0, Math.floor(rawTop));
+  // Ensure minimal visible height and add a small buffer to avoid 1px gaps
+  const heightPx = Math.max(20, Math.ceil(rawHeight) + 1);
 
       return {
         height: `${heightPx}px`,

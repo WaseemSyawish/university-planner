@@ -568,18 +568,18 @@ const AttendanceTracker = () => {
   // Show message if no courses exist
   if (!courses.length) {
     return (
-      <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100 p-6">
+      <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100 dark:bg-gradient-to-br dark:from-[#071023] dark:to-[#071423] p-6">
         <div className="max-w-7xl mx-auto">
-          <div className="cozy rounded-xl shadow-lg p-12 text-center">
-            <BookOpen size={64} className="mx-auto mb-6 text-gray-400" />
-            <h2 className="text-2xl font-bold text-gray-800 mb-4">No Courses Found</h2>
-            <p className="text-gray-600 mb-6">
-              You need to add some courses before you can track attendance. 
+          <div className="cozy rounded-xl shadow-lg p-16 sm:p-12 text-center">
+            <BookOpen size={64} className="mx-auto mb-6 text-gray-400 dark:text-slate-300" />
+            <h2 className="text-2xl font-bold text-gray-800 dark:text-slate-100 mb-4">No Courses Found</h2>
+            <p className="text-gray-600 dark:text-slate-200 mb-6">
+              You need to add some courses before you can track attendance.
               Go to the Modules Manager to add your courses.
             </p>
             <button
               onClick={() => window.location.href = '/modules'} // Adjust path as needed
-              className="px-6 py-3 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition-colors"
+              className="px-6 py-3 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition-colors dark:bg-indigo-500 dark:hover:bg-indigo-600"
             >
               Go to Modules Manager
             </button>

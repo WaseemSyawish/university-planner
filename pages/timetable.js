@@ -74,42 +74,12 @@ export default function TimetablePage() {
 
     ;(async () => {
       try {
-  const eventsUrl = (typeof process !== 'undefined' && process.env && process.env.NODE_ENV === 'development') ? '/api/events?userId=smoke_user' : '/api/events'
-  const res = await fetch(eventsUrl)
+        const res = await fetch('/api/events')
         if (!res.ok) throw new Error('failed to load events')
         const payload = await res.json()
         const list = Array.isArray(payload?.events) ? payload.events : (Array.isArray(payload) ? payload : [])
         if (!mounted) return
-        // If API returned no events in development, fall back to the local data/events.json
-        if (Array.isArray(list) && list.length === 0 && (typeof process !== 'undefined' && process.env && process.env.NODE_ENV === 'development')) {
-          try {
-            const fallback = await import('../data/events.json');
-            const fallbackList = Array.isArray(fallback?.default) ? fallback.default : (Array.isArray(fallback) ? fallback : []);
-            if (fallbackList && fallbackList.length > 0) {
-              console.info('[timetable] using local fallback events.json during development');
-              setEvents(mapToSchedulerEvents(fallbackList));
-            } else {
-              // final built-in dev sample so the UI shows something useful during local dev
-              const devSample = [
-                { id: 'dev-1', title: 'Lecture: Calculus I', date: new Date().toISOString().slice(0,10), time: '09:00', durationMinutes: 60, description: 'Room 101' },
-                { id: 'dev-2', title: 'Physics Lab', date: new Date().toISOString().slice(0,10), time: '11:00', durationMinutes: 120, description: 'Lab A' },
-                { id: 'dev-3', title: 'Study Group', date: new Date().toISOString().slice(0,10), time: '14:30', durationMinutes: 90, description: 'Library' }
-              ];
-              console.info('[timetable] using built-in dev sample events');
-              setEvents(mapToSchedulerEvents(devSample));
-            }
-          } catch (e) {
-            console.warn('Failed to load local fallback events.json', e);
-            const devSample = [
-              { id: 'dev-1', title: 'Lecture: Calculus I', date: new Date().toISOString().slice(0,10), time: '09:00', durationMinutes: 60, description: 'Room 101' },
-              { id: 'dev-2', title: 'Physics Lab', date: new Date().toISOString().slice(0,10), time: '11:00', durationMinutes: 120, description: 'Lab A' },
-              { id: 'dev-3', title: 'Study Group', date: new Date().toISOString().slice(0,10), time: '14:30', durationMinutes: 90, description: 'Library' }
-            ];
-            setEvents(mapToSchedulerEvents(devSample));
-          }
-        } else {
-          setEvents(mapToSchedulerEvents(list))
-        }
+        setEvents(mapToSchedulerEvents(list))
         // fetch recurrence options (non-blocking for events)
         try {
           const ro = await fetch('/api/recurrence-options')
@@ -144,39 +114,11 @@ export default function TimetablePage() {
   // reload events from server and update local state
   async function reloadEvents() {
     try {
-  const eventsUrl = (typeof process !== 'undefined' && process.env && process.env.NODE_ENV === 'development') ? '/api/events?userId=smoke_user' : '/api/events'
-  const res = await fetch(eventsUrl)
+      const res = await fetch('/api/events')
       if (!res.ok) throw new Error('failed to load events')
       const payload = await res.json()
       const list = Array.isArray(payload?.events) ? payload.events : (Array.isArray(payload) ? payload : [])
-      if (Array.isArray(list) && list.length === 0 && (typeof process !== 'undefined' && process.env && process.env.NODE_ENV === 'development')) {
-        try {
-          const fallback = await import('../data/events.json');
-          const fallbackList = Array.isArray(fallback?.default) ? fallback.default : (Array.isArray(fallback) ? fallback : []);
-          if (fallbackList && fallbackList.length > 0) {
-            console.info('[timetable] using local fallback events.json during development (reload)');
-            setEvents(mapToSchedulerEvents(fallbackList));
-          } else {
-            const devSample = [
-              { id: 'dev-1', title: 'Lecture: Calculus I', date: new Date().toISOString().slice(0,10), time: '09:00', durationMinutes: 60, description: 'Room 101' },
-              { id: 'dev-2', title: 'Physics Lab', date: new Date().toISOString().slice(0,10), time: '11:00', durationMinutes: 120, description: 'Lab A' },
-              { id: 'dev-3', title: 'Study Group', date: new Date().toISOString().slice(0,10), time: '14:30', durationMinutes: 90, description: 'Library' }
-            ];
-            console.info('[timetable] using built-in dev sample events (reload)');
-            setEvents(mapToSchedulerEvents(devSample));
-          }
-        } catch (e) {
-          console.warn('Failed to load local fallback events.json (reload)', e);
-          const devSample = [
-            { id: 'dev-1', title: 'Lecture: Calculus I', date: new Date().toISOString().slice(0,10), time: '09:00', durationMinutes: 60, description: 'Room 101' },
-            { id: 'dev-2', title: 'Physics Lab', date: new Date().toISOString().slice(0,10), time: '11:00', durationMinutes: 120, description: 'Lab A' },
-            { id: 'dev-3', title: 'Study Group', date: new Date().toISOString().slice(0,10), time: '14:30', durationMinutes: 90, description: 'Library' }
-          ];
-          setEvents(mapToSchedulerEvents(devSample));
-        }
-      } else {
-        setEvents(mapToSchedulerEvents(list))
-      }
+      setEvents(mapToSchedulerEvents(list))
     } catch (err) {
       console.warn('Failed to reload events', err)
     }
@@ -237,11 +179,6 @@ export default function TimetablePage() {
       let parsed = null
       try { parsed = JSON.parse(text) } catch (e) { parsed = null }
       const created = parsed?.event ?? parsed ?? null
-      // If the server indicated it materialized multiple occurrences, reload the list
-      if (created && (created._materialized_count && Number(created._materialized_count) > 1)) {
-        await reloadEvents()
-        return null
-      }
       if (created) return created
       // Fallback: if server didn't return an event object, refresh the list
       await reloadEvents()
@@ -301,23 +238,6 @@ export default function TimetablePage() {
         const res = await fetch(`/api/events/${encodeURIComponent(id)}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
         const text = await res.text();
         if (!res.ok) {
-          // If record was missing (404) and the update included a recurrence, try creating a new materialized series
-          if (res.status === 404 && event && event.recurrence && event.recurrence.id && event.recurrence.id !== 'none') {
-            try {
-              const postBody = { ...body };
-              postBody.repeatOption = event.recurrence.id;
-              postBody.materialize = true;
-              if (typeof process !== 'undefined' && process.env && process.env.NODE_ENV === 'development') postBody.userId = 'smoke_user';
-              const createResp = await fetch('/api/events', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(postBody) });
-              if (createResp.ok) {
-                // reload authoritative list
-                await reloadEvents();
-                return null;
-              }
-            } catch (cf) {
-              console.warn('Fallback create after missing event failed', cf);
-            }
-          }
           const err = new Error(text || `PATCH /api/events/${id} failed with ${res.status}`);
           err.status = res.status;
           throw err;
@@ -393,35 +313,10 @@ export default function TimetablePage() {
       </header>
 
       <main className="max-w-7xl mx-auto p-6">
-        {/* Dev debug panel: visible only during development to confirm client received events */}
-        {(typeof process !== 'undefined' && process.env && process.env.NODE_ENV === 'development') && (
-          <div className="mb-4 p-3 bg-yellow-50 border border-yellow-200 rounded">
-            <div className="font-medium text-sm">Dev events snapshot</div>
-            <div className="text-xs text-slate-600">If this list is empty the client did not receive any events.</div>
-            <div className="mt-2 space-y-1">
-              {events && events.length > 0 ? (
-                events.map(ev => (
-                  <div key={ev.id} className="text-sm">
-                    <strong>{ev.title}</strong> — <span className="text-xs">{String(ev.startDate)}</span>
-                  </div>
-                ))
-              ) : (
-                <div className="text-sm text-slate-700">(no events)</div>
-              )}
-            </div>
-          </div>
-        )}
         {loading ? (
           <div>Loading scheduler...</div>
         ) : SchedulerProviderComp && SchedularViewComp ? (
           <div className="mina-scheduler-root">
-            {/* Development debug overlay: shows client-side event count/title */}
-            {(typeof process !== 'undefined' && process.env && process.env.NODE_ENV === 'development') && (
-              <div style={{ position: 'fixed', right: 16, top: 88, zIndex: 99999, background: 'rgba(0,0,0,0.7)', color: '#fff', padding: '8px 10px', borderRadius: 6, fontSize: 12 }}>
-                <div>Events: {events.length}</div>
-                <div style={{ opacity: 0.9 }}>{events[0] ? events[0].title : '—'}</div>
-              </div>
-            )}
             <SchedulerProviderComp
               initialState={events}
               weekStartsOn="monday"
