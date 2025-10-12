@@ -1,6 +1,6 @@
 import { getToken } from 'next-auth/jwt';
 const bcrypt = require('bcryptjs');
-const prisma = require('../../../../lib/prisma');
+const prisma = require('../../../lib/prisma');
 
 export default async function handler(req, res) {
   try {
