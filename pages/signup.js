@@ -27,6 +27,26 @@ export default function SignUp() {
           caret-color: #e6eefb !important;
           -webkit-text-fill-color: #e6eefb !important;
         }
+
+        /* Autofill (Chrome / Edge) - ensure saved values remain visible */
+        .signup-root input:-webkit-autofill,
+        .signup-root input:-webkit-autofill:hover,
+        .signup-root input:-webkit-autofill:focus,
+        .signup-root input:-webkit-autofill:active {
+          -webkit-text-fill-color: #0b1220 !important;
+          -webkit-box-shadow: 0 0 0px 1000px var(--card-bg) inset !important;
+          box-shadow: 0 0 0px 1000px var(--card-bg) inset !important;
+          caret-color: #0b1220 !important;
+        }
+        html.dark .signup-root input:-webkit-autofill,
+        html.dark .signup-root input:-webkit-autofill:hover,
+        html.dark .signup-root input:-webkit-autofill:focus,
+        html.dark .signup-root input:-webkit-autofill:active {
+          -webkit-text-fill-color: #e6eefb !important;
+          -webkit-box-shadow: 0 0 0px 1000px var(--card-bg) inset !important;
+          box-shadow: 0 0 0px 1000px var(--card-bg) inset !important;
+          caret-color: #e6eefb !important;
+        }
       `}</style>
       <Head>
         <title>Sign up — University Planner</title>

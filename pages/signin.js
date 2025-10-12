@@ -101,6 +101,27 @@ export default function SignIn() {
           caret-color: #e6eefb !important;
           -webkit-text-fill-color: #e6eefb !important;
         }
+
+        /* Autofill (Chrome / Edge) - force the autofill background to match our card
+           and make the text visible. Use high specificity and !important. */
+        .signin-root input:-webkit-autofill,
+        .signin-root input:-webkit-autofill:hover,
+        .signin-root input:-webkit-autofill:focus,
+        .signin-root input:-webkit-autofill:active {
+          -webkit-text-fill-color: #0b1220 !important;
+          -webkit-box-shadow: 0 0 0px 1000px var(--card-bg) inset !important;
+          box-shadow: 0 0 0px 1000px var(--card-bg) inset !important;
+          caret-color: #0b1220 !important;
+        }
+        html.dark .signin-root input:-webkit-autofill,
+        html.dark .signin-root input:-webkit-autofill:hover,
+        html.dark .signin-root input:-webkit-autofill:focus,
+        html.dark .signin-root input:-webkit-autofill:active {
+          -webkit-text-fill-color: #e6eefb !important;
+          -webkit-box-shadow: 0 0 0px 1000px var(--card-bg) inset !important;
+          box-shadow: 0 0 0px 1000px var(--card-bg) inset !important;
+          caret-color: #e6eefb !important;
+        }
       `}</style>
       <Head>
         <title>Sign in — University Planner</title>
