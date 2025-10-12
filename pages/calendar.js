@@ -556,9 +556,9 @@ export default function CalendarPage() {
               <p className="text-xs text-slate-700 dark:text-slate-300">Manage your schedule</p>
             </div>
           </div>
-          <button onClick={handleTodayCreate} className="px-5 py-2 bg-gradient-to-r from-purple-600 to-purple-700 hover:from-purple-500 hover:to-purple-600 text-white rounded-lg text-sm font-medium transition-all duration-200 hover:shadow-lg hover:shadow-purple-500/30 flex items-center gap-2">
-            <Plus className="w-4 h-4" />
-            <span className="ml-2">Create</span>
+          <button onClick={() => { const t = new Date(); const ymd = toYMD(t); setCurrentDate(t); setSelectedDate(ymd); }} className="px-5 py-2 today-btn text-white rounded-lg text-sm font-medium transition-all duration-200 hover:shadow-lg hover:shadow-purple-500/30 flex items-center gap-2" aria-label="Go to today">
+            <Calendar className="w-4 h-4" />
+            <span className="ml-2">Today</span>
           </button>
         </div>
       </header>
