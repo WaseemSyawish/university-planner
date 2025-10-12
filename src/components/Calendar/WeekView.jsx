@@ -1,5 +1,5 @@
 import React, { useMemo, useRef, useState, useEffect } from 'react';
-import { Plus } from 'lucide-react';
+import { Plus, Trash2 } from 'lucide-react';
 import { buildLocalDateFromParts, formatTimeFromParts } from '../../lib/dateHelpers';
 
 export default function WeekView({ weekDates = [], timeSlots = [], classes = [], onSlotClick, onEventClick, compact = false, courses = [] }) {
@@ -31,6 +31,7 @@ export default function WeekView({ weekDates = [], timeSlots = [], classes = [],
   const [hoveredCol, setHoveredCol] = useState(-1);
   const [slotRowPx, setSlotRowPx] = useState(72);
   const firstRowRef = useRef(null);
+  const [openDeleteMenu, setOpenDeleteMenu] = useState(null);
 
   function parseTimeToMinutes(t) {
     if (!t) return null;
@@ -177,15 +178,14 @@ export default function WeekView({ weekDates = [], timeSlots = [], classes = [],
                       const y = ev.clientY - rect.top; // px from top of cell
                       const h = rect.height || slotRowPx;
                       const frac = Math.max(0, Math.min(1, y / h));
+                      // compute precise clicked minute (no forced snapping to 0/30)
                       const minutesIntoSlot = Math.round(frac * 60);
                       const clickedMinutes = (slotStartMinutes || 0) + minutesIntoSlot;
-                      // snap to 0 or 30
-                      const mins = clickedMinutes % 60;
-                      const snappedMins = mins >= 30 ? 30 : 0;
                       const hh = Math.floor(clickedMinutes / 60);
-                      const snapped = `${String(hh).padStart(2,'0')}:${String(snappedMins).padStart(2,'0')}`;
+                      const mm = clickedMinutes % 60;
+                      const snapped = `${String(hh).padStart(2,'0')}:${String(mm).padStart(2,'0')}`;
                       // Prevent creating an event if an existing event overlaps the clicked time
-                      const clickedTotal = hh * 60 + snappedMins;
+                      const clickedTotal = hh * 60 + mm;
                       const overlap = (classes || []).some(item => {
                         try {
                           // ignore optimistic temporary previews (tmp-*) during overlap checks
@@ -247,7 +247,7 @@ export default function WeekView({ weekDates = [], timeSlots = [], classes = [],
                           'yellow-500': '#F59E0B',
                           'gray-500': '#6B7280',
                           'purple-500': '#8B5CF6',
-                          'pink-500': '#EC4899',
+                          'pink-500': '#8B5CF6',
                           'teal-500': '#14B8A6'
                         };
 
@@ -352,6 +352,59 @@ export default function WeekView({ weekDates = [], timeSlots = [], classes = [],
                               </div>
                               <div className="text-xs opacity-90 ml-2" style={{ fontVariantNumeric: 'tabular-nums', fontSize: 12 }}>{formatTimeFromParts(evItem.date || d, evItem.time) || evItem.time || minutesToHHMM(startM)}</div>
                             </div>
+                          </div>
+
+                          {/* delete menu trigger (top-right) */}
+                          <div style={{ position: 'absolute', top: 6, right: 6, zIndex: 40 }}>
+                            <button
+                              onClick={(e) => { e.stopPropagation(); setOpenDeleteMenu(openDeleteMenu === evItem.id ? null : evItem.id); }}
+                              title="Delete"
+                              aria-label="Delete event"
+                              className="p-1 rounded hover:bg-black/10"
+                              style={{ background: 'transparent', border: 'none', display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}
+                            >
+                              <Trash2 className="w-4 h-4" />
+                            </button>
+
+                            {openDeleteMenu === evItem.id && (
+                              <div onClick={(e) => e.stopPropagation()} style={{ position: 'absolute', right: 0, top: 28, background: 'var(--card-bg)', border: '1px solid rgba(2,6,23,0.06)', borderRadius: 8, padding: 8, boxShadow: '0 6px 18px rgba(2,6,23,0.08)' }}>
+                                <button
+                                  onClick={async (e) => {
+                                    e.stopPropagation();
+                                    try {
+                                      if (!confirm('Delete this event occurrence?')) return;
+                                      const resp = await fetch('/api/events/' + encodeURIComponent(evItem.id), { method: 'DELETE' });
+                                      if (!resp.ok) throw new Error('Delete failed');
+                                      setOpenDeleteMenu(null);
+                                      if (typeof onEventDelete === 'function') onEventDelete(evItem, { scope: 'single' });
+                                      else window.location.reload();
+                                    } catch (err) {
+                                      console.error('Delete failed', err);
+                                      alert('Failed to delete event');
+                                    }
+                                  }}
+                                  className="block text-left w-full p-1 px-2 rounded hover:bg-gray-100"
+                                >Delete occurrence</button>
+
+                                <button
+                                  onClick={async (e) => {
+                                    e.stopPropagation();
+                                    try {
+                                      if (!confirm('Delete the entire series (all materialized occurrences and the template)?')) return;
+                                      const resp = await fetch('/api/events/' + encodeURIComponent(evItem.id) + '?scope=all', { method: 'DELETE' });
+                                      if (!resp.ok) throw new Error('Delete series failed');
+                                      setOpenDeleteMenu(null);
+                                      if (typeof onEventDelete === 'function') onEventDelete(evItem, { scope: 'all' });
+                                      else window.location.reload();
+                                    } catch (err) {
+                                      console.error('Delete series failed', err);
+                                      alert('Failed to delete series');
+                                    }
+                                  }}
+                                  className="block text-left w-full p-1 px-2 rounded hover:bg-gray-100 mt-1"
+                                >Delete series</button>
+                              </div>
+                            )}
                           </div>
                         </div>
                       );

@@ -7,6 +7,7 @@ import dynamic from "next/dynamic";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { CalendarIcon, CalendarDaysIcon } from "@/components/icons/simple-icons";
+import { ModernViewSwitcher } from "./modern-controls";
 // react-icons can be moderately large; import only used icons via dynamic if necessary
 const BsCalendarMonth = dynamic(() => import("react-icons/bs").then((m) => m.BsCalendarMonth), { ssr: false });
 const BsCalendarWeek = dynamic(() => import("react-icons/bs").then((m) => m.BsCalendarWeek), { ssr: false });
@@ -175,62 +176,32 @@ export default function SchedulerViewFilteration({
             className={cn("w-full", classNames?.tabs)}
           >
             <div className="flex justify-between items-center mb-4">
-              <TabsList className="grid grid-cols-3">
-                {viewsSelector?.includes("day") && (
-                  <TabsTrigger value="day">
-                    {CustomComponents?.customTabs?.CustomDayTab ? (
-                      CustomComponents.customTabs.CustomDayTab
-                    ) : (
-                      <div className="flex items-center space-x-2">
-                        <CalendarDaysIcon size={15} />
-                        <span>Day</span>
-                      </div>
-                    )}
-                  </TabsTrigger>
-                )}
-
-                {viewsSelector?.includes("week") && (
-                  <TabsTrigger value="week">
-                    {CustomComponents?.customTabs?.CustomWeekTab ? (
-                      CustomComponents.customTabs.CustomWeekTab
-                    ) : (
-                      <div className="flex items-center space-x-2">
-                        <BsCalendarWeek />
-                        <span>Week</span>
-                      </div>
-                    )}
-                  </TabsTrigger>
-                )}
-
-                {viewsSelector?.includes("month") && (
-                  <TabsTrigger value="month">
-                    {CustomComponents?.customTabs?.CustomMonthTab ? (
-                      CustomComponents.customTabs.CustomMonthTab
-                    ) : (
-                      <div className="flex items-center space-x-2">
-                        <BsCalendarMonth />
-                        <span>Month</span>
-                      </div>
-                    )}
-                  </TabsTrigger>
-                )}
-              </TabsList>
+                <div>
+                <ModernViewSwitcher currentView={activeView as any} onViewChange={(v: any) => setActiveView(v)} allowedViews={viewsSelector as any} />
+              </div>
 
               {/* Add Event Button */}
-              {CustomComponents?.customButtons?.CustomAddEventButton ? (
-                <div onClick={() => handleAddEvent()}>
-                  {CustomComponents?.customButtons.CustomAddEventButton}
-                </div>
-              ) : (
-                <Button
-                  onClick={() => handleAddEvent()}
-                  className={cn(classNames?.buttons?.addEvent, "text-white")}
-                  variant="default"
-                >
-                  <CalendarIcon className="mr-2 h-4 w-4 text-white" />
-                  Add Event
-                </Button>
-              )}
+              <div className="ml-auto">
+                {CustomComponents?.customButtons?.CustomAddEventButton ? (
+                  <div onClick={() => handleAddEvent()}>
+                    {CustomComponents?.customButtons.CustomAddEventButton}
+                  </div>
+                ) : (
+                  <Button
+                    onClick={() => {
+                      setActiveView("day");
+                      try {
+                        window.dispatchEvent(new CustomEvent('scheduler:goToDate', { detail: { date: new Date().toISOString() } }));
+                      } catch (e) {}
+                    }}
+                    className={cn(classNames?.buttons?.addEvent, "text-white")}
+                    variant="default"
+                  >
+                    <CalendarIcon className="mr-2 h-4 w-4 text-white" />
+                    Today
+                  </Button>
+                )}
+              </div>
             </div>
 
             {viewsSelector?.includes("day") && (

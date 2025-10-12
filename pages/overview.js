@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import Head from 'next/head';
 import { Calendar, BookOpen, TrendingUp, Clock, CheckCircle, AlertCircle, GraduationCap, Users } from 'lucide-react';
 import CalendarHeader from '../src/components/CalendarHeader.jsx';
 
@@ -401,6 +402,9 @@ export default function UniversityOverview() {
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-gray-50 to-purple-50 dark:from-transparent dark:bg-gray-900">
+      <Head>
+        <title>Overview — University Planner</title>
+      </Head>
       {/* Top Navigation (reusable) */}
       <CalendarHeader userName={userName} />
 

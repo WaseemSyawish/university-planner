@@ -183,3 +183,17 @@ html.dark .timetable-root .text-slate-700 { color: var(--muted-700) !important; 
 html.dark .mina-scheduler-root, html.dark .mina-scheduler-root * { color: var(--brand-900) !important; }
 html.dark .mina-scheduler-root button, html.dark .mina-scheduler-root .btn, html.dark .mina-scheduler-root .nextui-button, html.dark .mina-scheduler-root [role="button"] { color: #fff !important; }
 html.dark .nextui-portal, html.dark [data-nextui-dialog-backdrop], html.dark [data-nextui-dialog] { color: var(--brand-900) !important; }
+
+/* Fix button padding issues in timetable/calendar views */
+.timetable-root button,
+.calendar-root button,
+.mina-scheduler-root button {
+  padding: 0.5rem 1rem !important;
+  min-height: 2.5rem;
+}
+
+/* Ensure navigation buttons specifically have proper padding */
+.timetable-root button[class*="outline"],
+.calendar-root button[class*="outline"] {
+  padding: 0.5rem 1rem !important;
+}

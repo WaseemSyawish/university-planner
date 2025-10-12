@@ -1,4 +1,5 @@
 import React, { useState, useMemo, useEffect, useRef } from 'react';
+import Head from 'next/head';
 import { Calendar, Plus, ChevronLeft, ChevronRight, Trash2, Edit3, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
@@ -545,6 +546,9 @@ export default function CalendarPage() {
 
   return (
     <div className="calendar-root min-h-screen bg-gradient-to-br from-slate-50 via-blue-50/30 to-slate-50">
+      <Head>
+        <title>Calendar — University Planner</title>
+      </Head>
       <header className="bg-white/95 backdrop-blur-xl border-b border-slate-200/60 px-6 py-4 sticky top-0 z-40 shadow-sm">
         <div className="flex items-center justify-between max-w-7xl mx-auto">
           <div className="flex items-center gap-3">

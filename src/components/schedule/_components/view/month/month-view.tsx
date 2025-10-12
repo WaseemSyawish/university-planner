@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useState, useCallback } from "react";
-import { AnimatePresence } from "framer-motion";
+import { AnimatePresence, motion } from "framer-motion";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -77,7 +77,6 @@ export default function MonthView({
   }, [currentDate]);
 
   function handleAddEvent(selectedDay: number) {
-    // Create start date at 12:00 AM on the selected day
     const startDate = new Date(
       currentDate.getFullYear(),
       currentDate.getMonth(),
@@ -87,7 +86,6 @@ export default function MonthView({
       0
     );
 
-    // Create end date at 11:59 PM on the same day
     const endDate = new Date(
       currentDate.getFullYear(),
       currentDate.getMonth(),
@@ -130,23 +128,6 @@ export default function MonthView({
     );
   }
 
-  const containerVariants = {
-    enter: { opacity: 0 },
-    center: {
-      opacity: 1,
-      transition: {
-        staggerChildren: 0.02,
-      },
-    },
-    exit: { opacity: 0 },
-  };
-
-  const itemVariants = {
-    enter: { opacity: 0, y: 20 },
-    center: { opacity: 1, y: 0, transition: { duration: 0.3 } },
-    exit: { opacity: 0, y: -20, transition: { duration: 0.2 } },
-  };
-
   const daysOfWeek =
     weekStartsOn === "monday"
       ? ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
@@ -161,7 +142,6 @@ export default function MonthView({
   const startOffset =
     (firstDayOfMonth.getDay() - (weekStartsOn === "monday" ? 1 : 0) + 7) % 7;
 
-  // Calculate previous month's last days for placeholders
   const prevMonth = new Date(
     currentDate.getFullYear(),
     currentDate.getMonth() - 1,
@@ -172,10 +152,11 @@ export default function MonthView({
     prevMonth.getMonth() + 1,
     0
   ).getDate();
+
   return (
     <div className="bg-default-50 -mx-6 p-6 rounded-b-lg">
-      <div className="flex flex-col mb-2 pt-2 max-w-[1200px] mx-auto">
-  <h2 className="text-3xl my-3 tracking-tighter font-bold">
+      <div className="flex flex-col mb-4 pt-2 max-w-[1200px] mx-auto">
+        <h2 className="text-3xl my-3 tracking-tighter font-bold">
           {currentDate.toLocaleString("default", { month: "long" })}{" "}
           {currentDate.getFullYear()}
         </h2>
@@ -206,94 +187,113 @@ export default function MonthView({
           )}
         </div>
       </div>
+
       <AnimatePresence initial={false} custom={direction} mode="wait">
-  <div className="grid grid-cols-7 gap-2 sm:gap-3 mt-6 max-w-[1500px] mx-auto">
-          {daysOfWeek.map((day, idx) => (
-            <div key={idx} className="text-left py-6 text-2xl tracking-tighter font-medium">
-              {day}
-            </div>
-          ))}
-
-          {Array.from({ length: startOffset }).map((_, idx) => (
-            <div key={`offset-${idx}`} className="h-[150px] opacity-50">
-              <div className={clsx("font-semibold relative text-2xl mb-1")}>
-                {lastDateOfPrevMonth - startOffset + idx + 1}
+        <motion.div
+          key={currentDate.toISOString()}
+          custom={direction}
+          variants={pageTransitionVariants}
+          initial="enter"
+          animate="center"
+          exit="exit"
+          transition={{ opacity: { duration: 0.2 } }}
+        >
+          <div className="grid grid-cols-7 gap-2 sm:gap-3 mt-6 max-w-[1500px] mx-auto">
+            {daysOfWeek.map((day, idx) => (
+              <div
+                key={idx}
+                className="text-left py-6 text-2xl tracking-tighter font-medium text-black dark:text-white"
+              >
+                {day}
               </div>
-            </div>
-          ))}
+            ))}
 
-          {daysInMonth.map((dayObj) => {
-            const dayEvents = getters.getEventsForDay(dayObj.day, currentDate);
-
-            return (
-              <div onClick={() => handleAddEvent(dayObj.day)} className="w-full">
-                <div
-                  className="hover:z-50 border-none h-[150px] rounded group flex flex-col"
-                  key={dayObj.day}
-                >
-                <Card
-                  className="shadow-sm cursor-pointer overflow-hidden relative flex flex-col justify-between p-3 border h-full rounded-lg bg-white"
-                >
-                        <div
-                          className={clsx(
-                            "font-semibold relative text-2xl",
-                            dayEvents.length > 0
-                              ? "text-primary-600"
-                              : "text-muted-foreground",
-                            new Date().getDate() === dayObj.day &&
-                              new Date().getMonth() === currentDate.getMonth() &&
-                              new Date().getFullYear() === currentDate.getFullYear()
-                              ? "text-secondary-500"
-                              : ""
-                          )}
-                          style={{ marginBottom: 6 }}
-                        >
-                          {dayObj.day}
-                        </div>
-                  <div className="flex-grow flex flex-col justify-center items-center gap-1 w-full mt-0">
-                    {/* spacer above to push the pill down slightly */}
-                    <div className="flex-1" />
-                    {dayEvents?.length > 0 && (
-                      <div className="w-full max-w-[90%] mt-0" style={{ marginBottom: 6 }}>
-                        <div className="flex justify-center">
-                          <EventStyled
-                            event={{ ...dayEvents[0], CustomEventComponent, minmized: true }}
-                            CustomEventModal={CustomEventModal}
-                          />
-                        </div>
-                      </div>
-                    )}
-                    {dayEvents.length > 1 && (
-                      <Badge
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          handleShowMoreEvents(dayEvents);
-                        }}
-                        variant="outline"
-                        className="hover:bg-default-200 absolute right-2 text-xs top-2 transition duration-300"
-                      >
-                        {dayEvents.length > 1
-                          ? `+${dayEvents.length - 1}`
-                          : " "}
-                      </Badge>
-                    )}
-                    <div style={{ height: 6 }} />
-                  </div>
-
-                  {/* Hover Text (use a neutral overlay to avoid strong green tint) */}
-                  {dayEvents.length === 0 && (
-                    <div className="absolute inset-0 bg-black/4 flex items-center justify-center opacity-0 group-hover:opacity-80 transition-opacity duration-200 pointer-events-none">
-                      <span className="text-black/70 tracking-tighter text-lg font-semibold">
-                        Add Event
-                      </span>
-                    </div>
-                  )}
-                </Card>
+            {Array.from({ length: startOffset }).map((_, idx) => (
+              <div key={`offset-${idx}`} className="h-[150px] opacity-50">
+                <div className="font-semibold relative text-2xl mb-1">
+                  {lastDateOfPrevMonth - startOffset + idx + 1}
                 </div>
               </div>
-            );
-          })}
-  </div>
+            ))}
+
+            {daysInMonth.map((dayObj) => {
+              const dayEvents = getters.getEventsForDay(dayObj.day, currentDate);
+              const isToday =
+                new Date().getDate() === dayObj.day &&
+                new Date().getMonth() === currentDate.getMonth() &&
+                new Date().getFullYear() === currentDate.getFullYear();
+
+              return (
+                <div
+                  key={dayObj.day}
+                  onClick={() => handleAddEvent(dayObj.day)}
+                  className="w-full"
+                >
+                  <div className="hover:z-50 border-none h-[150px] rounded group flex flex-col transition-transform duration-200 hover:scale-[1.02]">
+                    <Card className="shadow-sm cursor-pointer overflow-hidden relative flex flex-col justify-between p-3 border h-full rounded-lg bg-background transition-shadow duration-200 hover:shadow-md">
+                      <div
+                        className={clsx(
+                          "font-semibold relative text-2xl transition-colors duration-200 inline-block",
+                          dayEvents.length > 0
+                            ? "text-primary-600"
+                            : "text-black dark:text-muted-foreground",
+                          isToday && "bg-purple-50 text-purple-700 dark:bg-purple-900 dark:text-purple-200 rounded-full px-2 py-1"
+                        )}
+                        style={{ marginBottom: 6 }}
+                      >
+                        {dayObj.day}
+                      </div>
+
+                      <div className="flex-grow flex flex-col justify-center items-center gap-1 w-full mt-0">
+                        <div className="flex-1" />
+                        {dayEvents?.length > 0 && (
+                          <div
+                            className="w-full max-w-[90%] mt-0"
+                            style={{ marginBottom: 6 }}
+                          >
+                            <div className="flex justify-center">
+                              <EventStyled
+                                event={{
+                                  ...dayEvents[0],
+                                  CustomEventComponent,
+                                  minmized: true,
+                                }}
+                                CustomEventModal={CustomEventModal}
+                              />
+                            </div>
+                          </div>
+                        )}
+                        {dayEvents.length > 1 && (
+                          <Badge
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleShowMoreEvents(dayEvents);
+                            }}
+                            variant="outline"
+                            className="hover:bg-default-200 absolute right-2 text-xs top-2 transition-all duration-200 hover:scale-105"
+                          >
+                            {dayEvents.length > 1
+                              ? `+${dayEvents.length - 1}`
+                              : " "}
+                          </Badge>
+                        )}
+                        <div style={{ height: 6 }} />
+                      </div>
+
+                      {dayEvents.length === 0 && (
+                        <div className="absolute inset-0 bg-black/4 flex items-center justify-center opacity-0 group-hover:opacity-80 transition-opacity duration-300 pointer-events-none rounded-lg">
+                          <span className="text-black/70 tracking-tighter text-lg font-semibold">
+                            Add Event
+                          </span>
+                        </div>
+                      )}
+                    </Card>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </motion.div>
       </AnimatePresence>
     </div>
   );

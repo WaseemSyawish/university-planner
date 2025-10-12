@@ -3,7 +3,8 @@ import { createPortal } from 'react-dom';
 
 const SelectContext = createContext(null);
 
-export function Select({ value, onValueChange, children, className = '' }) {
+export function Select({ value, onValueChange, children, className = '', flip = 'auto' }) {
+  // flip: 'auto' | 'down' | 'up' - controls whether dropdown may flip above the trigger
   const [open, setOpen] = useState(false);
   const ref = useRef(null);
   const portalIdRef = useRef('select-portal-' + Math.random().toString(36).slice(2, 9));
@@ -41,7 +42,7 @@ export function Select({ value, onValueChange, children, className = '' }) {
   }, [open]);
 
   return (
-    <SelectContext.Provider value={{ value, onValueChange, open, setOpen, anchorRect, portalId: portalIdRef.current }}>
+    <SelectContext.Provider value={{ value, onValueChange, open, setOpen, anchorRect, portalId: portalIdRef.current, flip }}>
       <div ref={ref} className={`relative inline-block ${className}`}>{children}</div>
     </SelectContext.Provider>
   );
@@ -83,22 +84,31 @@ export function SelectContent({ children, className = '', style = {} }) {
   if (!ctx.open) return null;
 
   const rect = ctx.anchorRect || { top: 0, left: 0, width: 120, height: 36 };
-  let left = rect.left + window.scrollX;
+  // prefer centering the dropdown under the trigger
   const minWidth = Math.max(88, rect.width);
+  let left = rect.left + window.scrollX + rect.width / 2 - minWidth / 2;
   // clamp horizontally to viewport
   const maxLeft = window.scrollX + Math.max(document.documentElement.clientWidth - minWidth - 12, 12);
   if (left > maxLeft) left = maxLeft;
   if (left < window.scrollX + 8) left = window.scrollX + 8;
 
-  // compute top and flip above if needed
+  // compute top and flip above if needed. Prefer aligning the dropdown vertically with a small gap
   const estimatedContentHeight = 260; // match maxHeight
-  const spaceBelow = window.scrollY + document.documentElement.clientHeight - (rect.bottom + window.scrollY) - 8;
-  let top = rect.bottom + window.scrollY + 6;
-  if (spaceBelow < Math.min(estimatedContentHeight, window.innerHeight * 0.5)) {
-    // not enough space below, try place above
-    top = rect.top + window.scrollY - Math.min(estimatedContentHeight, window.innerHeight * 0.5) - 6;
-    // if still too high, clamp
+  const gap = 6;
+  // Compute available space relative to the viewport (not document coords)
+  const contentHeight = Math.min(estimatedContentHeight, window.innerHeight * 0.5);
+  const spaceBelowViewport = window.innerHeight - rect.bottom; // pixels below trigger in viewport
+  // Default: place below (viewport coords), then convert to page coords by adding scrollY
+  let top = rect.bottom + window.scrollY + gap;
+  if (ctx.flip !== 'down' && spaceBelowViewport < contentHeight + 8) {
+    // not enough space below, place above the trigger
+    top = rect.top + window.scrollY - contentHeight - gap;
+    // clamp to viewport top + padding
     if (top < window.scrollY + 8) top = window.scrollY + 8;
+  } else if (ctx.flip === 'down') {
+    // force below: ensure top is below trigger (but clamp if beyond viewport bottom)
+    const maxTop = window.scrollY + window.innerHeight - contentHeight - 8;
+    if (top > maxTop) top = Math.max(window.scrollY + 8, maxTop);
   }
 
     const content = (

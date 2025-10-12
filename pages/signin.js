@@ -1,7 +1,9 @@
+import { useState } from 'react';
+import Head from 'next/head';
 import Link from 'next/link';
 import { useRouter } from 'next/router';
-import { useState } from 'react';
 import { signIn } from 'next-auth/react';
+import { GraduationCap, Mail, Lock, ArrowRight, AlertCircle } from 'lucide-react';
 
 export default function SignIn() {
   const router = useRouter();
@@ -17,8 +19,6 @@ export default function SignIn() {
     const email = form.get('email');
     const password = form.get('password');
 
-    // Use next-auth signIn with credentials provider. Use redirect: false to inspect result,
-    // then navigate to the callback URL so NextAuth sets its session cookie correctly.
     try {
       const result = await signIn('credentials', { redirect: false, email, password, callbackUrl: returnTo });
       if (!result) {
@@ -27,9 +27,6 @@ export default function SignIn() {
         return;
       }
       if (result.error) {
-        // next-auth often returns short error codes (e.g. 'CredentialsSignin').
-        // Map known codes to friendly messages for users while logging details
-        // for diagnostics.
         const code = typeof result.error === 'string' ? result.error : '';
         console.warn('[signin] next-auth returned error code', code, result);
         const friendly = (c) => {
@@ -43,8 +40,7 @@ export default function SignIn() {
         return;
       }
       console.log('[signin] next-auth signIn result', result);
-      // Verify session server-side by calling our /api/auth/me endpoint. If the session is active
-      // the middleware and server will accept the user. This guards against cookie not being set.
+      
       try {
         const check = await fetch('/api/auth/me');
         if (check.ok) {
@@ -59,8 +55,6 @@ export default function SignIn() {
         console.warn('[signin] /api/auth/me check failed', e);
       }
 
-      // If programmatic signIn didn't attach a usable session, do a redirect-based signIn
-      // so the server callback can set cookies.
       try {
         await signIn('credentials', { redirect: true, email, password, callbackUrl: returnTo });
         return;
@@ -76,27 +70,120 @@ export default function SignIn() {
   }
 
   return (
-    <div style={{ padding: 36 }}>
-      <div className="card" style={{ maxWidth: 480, margin: '48px auto' }}>
-        <h2 style={{ marginTop: 0 }}>Sign in</h2>
-        <p className="muted">Sign in to access your planner.</p>
+  <div className="min-h-screen signin-root bg-gradient-to-br from-purple-50 via-white to-indigo-50 flex items-center justify-center p-4">
+      <Head>
+        <title>Sign in — University Planner</title>
+      </Head>
+      <div className="w-full max-w-md">
+        {/* Logo and Header */}
+        <div className="text-center mb-8">
+          <div className="inline-flex items-center justify-center w-16 h-16 bg-purple-600 rounded-2xl mb-4 shadow-lg">
+            <GraduationCap className="w-8 h-8 text-white" />
+          </div>
+          <h1 className="text-3xl font-bold text-slate-900 mb-2" style={{ color: '#0b1220' }}>Welcome back</h1>
+          <p className="text-slate-700" style={{ color: '#334155' }}>Sign in to continue to University Planner</p>
+        </div>
 
-        <form onSubmit={handleSubmit}>
-          <input type="hidden" name="returnTo" value={returnTo} />
-          <div style={{ marginTop: 12 }}>
-            <label className="text-xs">Email</label>
-            <input name="email" className="cozy-input" type="email" required style={{ width: '100%' }} />
+        {/* Sign In Card */}
+        <div className="bg-white rounded-2xl shadow-xl border border-gray-100 p-8">
+          <form onSubmit={handleSubmit} className="space-y-6">
+            <input type="hidden" name="returnTo" value={returnTo} />
+            
+            {/* Email Field */}
+            <div>
+              <label htmlFor="email" className="block text-sm font-medium text-gray-700 mb-2">
+                Email address
+              </label>
+              <div className="relative">
+                <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+                  <Mail className="h-5 w-5 text-gray-400" />
+                </div>
+                <input
+                  id="email"
+                  name="email"
+                  type="email"
+                  required
+                  autoComplete="email"
+                  className="block w-full pl-10 pr-3 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent transition-all"
+                  placeholder="you@university.edu"
+                />
+              </div>
+            </div>
+
+            {/* Password Field */}
+            <div>
+              <label htmlFor="password" className="block text-sm font-medium text-gray-700 mb-2">
+                Password
+              </label>
+              <div className="relative">
+                <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+                  <Lock className="h-5 w-5 text-gray-400" />
+                </div>
+                <input
+                  id="password"
+                  name="password"
+                  type="password"
+                  required
+                  autoComplete="current-password"
+                  className="block w-full pl-10 pr-3 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent transition-all"
+                  placeholder="••••••••"
+                />
+              </div>
+            </div>
+
+            {/* Error Message */}
+            {error && (
+              <div className="bg-red-50 border border-red-200 rounded-lg p-4 flex items-start gap-3">
+                <AlertCircle className="w-5 h-5 text-red-600 flex-shrink-0 mt-0.5" />
+                <p className="text-sm text-red-800">{error}</p>
+              </div>
+            )}
+
+            {/* Sign In Button */}
+            <button
+              type="submit"
+              disabled={loading}
+              className="w-full bg-purple-600 text-white py-3 px-4 rounded-lg font-medium hover:bg-purple-700 focus:outline-none focus:ring-2 focus:ring-purple-500 focus:ring-offset-2 transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+            >
+              {loading ? (
+                <>
+                  <div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                  Signing in...
+                </>
+              ) : (
+                <>
+                  Sign in
+                  <ArrowRight className="w-5 h-5" />
+                </>
+              )}
+            </button>
+          </form>
+
+          {/* Divider */}
+          <div className="relative my-6">
+            <div className="absolute inset-0 flex items-center">
+              <div className="w-full border-t border-gray-200" />
+            </div>
+            <div className="relative flex justify-center text-sm">
+              <span className="px-4 bg-white text-gray-500">Don't have an account?</span>
+            </div>
           </div>
-          <div style={{ marginTop: 12 }}>
-            <label className="text-xs">Password</label>
-            <input name="password" className="cozy-input" type="password" required style={{ width: '100%' }} />
-          </div>
-          {error ? <div style={{ color: 'crimson', marginTop: 8 }}>{error}</div> : null}
-          <div style={{ marginTop: 14, display: 'flex', gap: 8 }}>
-            <button className="btn-primary" disabled={loading}>{loading ? 'Signing in…' : 'Sign in'}</button>
-            <Link href="/landing" className="btn-secondary">Back</Link>
-          </div>
-        </form>
+
+          {/* Sign Up Link */}
+          <Link
+            href="/signup"
+            className="block w-full text-center py-3 px-4 border border-gray-300 rounded-lg font-medium text-gray-700 hover:bg-gray-50 hover:border-gray-400 transition-all"
+          >
+            Create an account
+          </Link>
+        </div>
+
+        {/* Back to Landing */}
+        <div className="mt-6 text-center">
+          <Link href="/landing" className="text-sm text-gray-600 hover:text-gray-900 transition-colors">
+            ← Back to home
+          </Link>
+        </div>
       </div>
     </div>
   );

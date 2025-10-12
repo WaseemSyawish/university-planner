@@ -62,6 +62,7 @@ export default async function handler(req, res) {
           location: true,
           archived: true,
           course_id: true,
+          color: true,
           template_id: true,
           date: true,
           time: true,
@@ -83,9 +84,17 @@ export default async function handler(req, res) {
         return await prisma.event.update({ where: { id: evtId }, data, include: includeCourses ? { courses: true } : undefined });
       } catch (e) {
         if (!isMissingColumnError(e)) throw e;
-        console.warn('[events/:id] retrying update without `meta` due to DB schema mismatch');
+        // If the DB/schema mismatch mentions unsupported fields (e.g. end_date), strip them and retry.
+        console.warn('[events/:id] retrying update without unsupported fields due to DB schema mismatch', e && e.message ? String(e.message) : '');
         const copy = { ...data };
         if (Object.prototype.hasOwnProperty.call(copy, 'meta')) delete copy.meta;
+        // Remove end_date if error message references it
+        try {
+          const mmsg = e && e.message ? String(e.message) : '';
+          if (/unknown (argument|arg).*end_date/i.test(mmsg) || /Unknown argument `end_date`/.test(mmsg) || /end_date/.test(mmsg)) {
+            if (Object.prototype.hasOwnProperty.call(copy, 'end_date')) delete copy.end_date;
+          }
+        } catch (ee) {}
         return await prisma.event.update({ where: { id: evtId }, data: copy, include: includeCourses ? { courses: true } : undefined });
       }
     };
@@ -96,9 +105,15 @@ export default async function handler(req, res) {
         return await prisma.event.create({ data, include: includeCourses ? { courses: true } : undefined });
       } catch (e) {
         if (!isMissingColumnError(e)) throw e;
-        console.warn('[events/:id] retrying create without `meta` due to DB schema mismatch');
+        console.warn('[events/:id] retrying create without unsupported fields due to DB schema mismatch', e && e.message ? String(e.message) : '');
         const copy = { ...data };
         if (Object.prototype.hasOwnProperty.call(copy, 'meta')) delete copy.meta;
+        try {
+          const mmsg = e && e.message ? String(e.message) : '';
+          if (/unknown (argument|arg).*end_date/i.test(mmsg) || /Unknown argument `end_date`/.test(mmsg) || /end_date/.test(mmsg)) {
+            if (Object.prototype.hasOwnProperty.call(copy, 'end_date')) delete copy.end_date;
+          }
+        } catch (ee) {}
         return await prisma.event.create({ data: copy, include: includeCourses ? { courses: true } : undefined });
       }
     };
@@ -291,7 +306,7 @@ export default async function handler(req, res) {
 
         // Helper: pick only fields that exist on the Prisma Event/ArchivedEvent models
         const pickPrismaFields = (src) => {
-          const allowed = ['title', 'type', 'course_id', 'date', 'time', 'end_date', 'description', 'completed', 'archived', 'location', 'meta'];
+          const allowed = ['title', 'type', 'course_id', 'date', 'time', 'end_date', 'description', 'completed', 'archived', 'location', 'meta', 'color'];
           const out = {};
           for (const k of allowed) {
             if (Object.prototype.hasOwnProperty.call(src, k)) out[k] = src[k];

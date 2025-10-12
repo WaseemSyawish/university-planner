@@ -34,7 +34,7 @@ export default async function handler(req, res) {
         'yellow-500': '#F59E0B',
         'gray-500': '#6B7280',
         'purple-500': '#8B5CF6',
-        'pink-500': '#EC4899',
+                'pink-500': '#8B5CF6',
         'teal-500': '#14B8A6'
       };
       const normalize = (c) => {

@@ -5,6 +5,7 @@ export default function Welcome() {
   return (
     <div className="landing-root">
       <Head>
+        <title>University Planner</title>
         <link rel="preconnect" href="https://fonts.googleapis.com" />
         <link rel="preconnect" href="https://fonts.gstatic.com" crossOrigin="" />
         <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&display=swap" rel="stylesheet" />
@@ -21,7 +22,7 @@ export default function Welcome() {
                   <path d="M12 24h12v2H12z" fill="white" opacity="0.9" />
                 </svg>
               </span>
-              <span className="brand-text">University Planner</span>
+              <span className="brand-text text-slate-900 dark:text-slate-50" style={{ color: '#0b1220' }}>University Planner</span>
             </Link>
           </div>
 
@@ -35,9 +36,9 @@ export default function Welcome() {
               </svg>
             </label>
             <ul className="nav-list" role="menubar">
-              <li role="none"><Link role="menuitem" href="#features" className="nav-link">Features</Link></li>
-              <li role="none"><Link role="menuitem" href="#testimonials" className="nav-link">Customers</Link></li>
-              <li role="none"><Link role="menuitem" href="/docs" className="nav-link muted">Docs</Link></li>
+              <li role="none"><Link role="menuitem" href="#features" className="nav-link text-slate-900 dark:text-slate-100" style={{ color: '#0b1220' }}>Features</Link></li>
+              <li role="none"><Link role="menuitem" href="#testimonials" className="nav-link text-slate-900 dark:text-slate-100" style={{ color: '#0b1220' }}>Customers</Link></li>
+              <li role="none"><Link role="menuitem" href="/docs" className="nav-link muted text-slate-700 dark:text-slate-300" style={{ color: '#334155' }}>Docs</Link></li>
             </ul>
             <div className="nav-ctas">
               <Link href="/signin" className="nav-link nav-signin">Sign in</Link>

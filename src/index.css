@@ -41,6 +41,25 @@ html.dark {
 	--pill-bg: #f6f7fb;
 }
 
+/* Specific overrides: landing nav sits on a light backdrop even when html.dark
+   is present. Ensure the brand and nav links remain dark on that light surface. */
+.landing-nav, .landing-nav .brand, .landing-nav .nav-list, .landing-nav .nav-right {
+	color: #0b1220; /* dark text for light navbar */
+}
+.landing-nav .brand-text, .landing-nav .nav-link {
+	color: #0b1220 !important;
+}
+
+/* Sign-in / Sign-up pages use a white card on a light background. In cases
+   where html.dark maps utility classes to light colors, force headings and
+   key text to remain dark to preserve contrast. */
+.signin-root h1, .signup-root h1 {
+	color: #0b1220 !important;
+}
+.signin-root p, .signup-root p {
+	color: #334155 !important; /* slightly muted but dark */
+}
+
 /* readable muted token for utility classes used in components */
 :root {
 	--muted-700: #374151;
@@ -221,6 +240,25 @@ html.dark .px-3 {
 	background: rgba(2,6,23,0.5);
 	z-index: 60;
 	padding: 24px;
+}
+
+/* Backup overrides appended to the end of the file to ensure they win in the cascade */
+.landing-nav .brand-text, .landing-nav .nav-link { color: #0b1220 !important; }
+.signin-root h1, .signup-root h1 { color: #0b1220 !important; }
+.signin-root p, .signup-root p { color: #334155 !important; }
+
+/* Stronger overrides with html.dark prefix to beat existing dark remap rules */
+html.dark .landing-nav .brand-text,
+html.dark .landing-nav .nav-link {
+	color: #0b1220 !important;
+}
+html.dark .signin-root h1,
+html.dark .signup-root h1 {
+	color: #0b1220 !important;
+}
+html.dark .signin-root p,
+html.dark .signup-root p {
+	color: #334155 !important;
 }
 .modal-panel {
 	width: 100%;
@@ -1937,5 +1975,3 @@ html.dark select.force-light-select:focus {
 	border-color: rgba(0,0,0,0.06) !important;
 	background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='20' height='20' viewBox='0 0 24 24' fill='none' stroke='%230b1220' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><polyline points='6 9 12 15 18 9'></polyline></svg>") !important;
 }
-
-

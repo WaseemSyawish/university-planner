@@ -32,26 +32,35 @@ export default function SelectDate({
   setValue: UseFormSetValue<EventFormData>;
 }) {
 
-  // debug removed
+  const parseToDate = (v: any) => {
+    if (!v) return new Date();
+    if (Object.prototype.toString.call(v) === '[object Date]') return v as Date;
+    try {
+      return new Date(String(v));
+    } catch (e) {
+      return new Date();
+    }
+  };
+
   const [startDate, setStartDate] = useState<Date>(
-    data?.startDate instanceof Date ? data.startDate : new Date()
+    data?.startDate ? parseToDate(data.startDate) : new Date()
   );
   
   const [endDate, setEndDate] = useState<Date>(
-    data?.endDate instanceof Date ? data.endDate : new Date()
+    // If caller provided an endDate, parse it; otherwise initialize end to the same
+    // instant as startDate (do not default to `new Date()` which is 'now' and can
+    // cause accidental 1hr durations when users only edit start time).
+    data?.endDate ? parseToDate(data.endDate) : new Date((data?.startDate ? parseToDate(data.startDate).getTime() : new Date().getTime()))
   );
 
-  // Convert 24-hour format to 12-hour format
   const get12HourFormat = (hour: number) => {
     return hour === 0 ? 12 : hour > 12 ? hour - 12 : hour;
   };
 
-  // Get period (AM/PM) from hour
   const getPeriod = (hour: number) => {
     return hour >= 12 ? "PM" : "AM";
   };
 
-  // Convert 12-hour format to 24-hour format
   const get24HourFormat = (hour: number, period: string) => {
     if (period === "AM") {
       return hour === 12 ? 0 : hour;
@@ -59,7 +68,7 @@ export default function SelectDate({
       return hour === 12 ? 12 : hour + 12;
     }
   };
-  // controlled sub-states for time selectors (12-hour components)
+
   const [startHour12, setStartHour12] = useState<number>(get12HourFormat(startDate.getHours()));
   const [startMinute, setStartMinute] = useState<number>(startDate.getMinutes());
   const [startPeriod, setStartPeriod] = useState<string>(getPeriod(startDate.getHours()));
@@ -67,8 +76,13 @@ export default function SelectDate({
   const [endHour12, setEndHour12] = useState<number>(get12HourFormat(endDate.getHours()));
   const [endMinute, setEndMinute] = useState<number>(endDate.getMinutes());
   const [endPeriod, setEndPeriod] = useState<string>(getPeriod(endDate.getHours()));
+  // Start with endAuto=false to avoid treating the initial end as an auto-populated
+  // value that later flows could overwrite. When the user explicitly changes end
+  // we set endAuto=false below; when we intentionally auto-set it (not used
+  // currently) we could flip it to true.
+  const [endAuto, setEndAuto] = useState<boolean>(false);
+  const prevStartRef = React.useRef<Date | null>(startDate);
   
-  // Update state when data changes
   useEffect(() => {
     if (data?.startDate instanceof Date) {
       setStartDate(data.startDate);
@@ -78,7 +92,6 @@ export default function SelectDate({
     }
   }, [data]);
 
-  // sync controlled time parts when dates change externally
   useEffect(() => {
     setStartHour12(get12HourFormat(startDate.getHours()));
     setStartMinute(startDate.getMinutes());
@@ -91,30 +104,27 @@ export default function SelectDate({
     setEndPeriod(getPeriod(endDate.getHours()));
   }, [endDate]);
   
-  // Update form values when dates change
+  // When startDate changes, do not auto-adjust endDate — preserve user's choice.
   useEffect(() => {
-    try { console.debug('SelectDate.setValue startDate=', startDate); } catch(e) {}
-    setValue("startDate", startDate);
-    
-    // Ensure end date is not before start date
-    if (isBefore(endDate, startDate)) {
-      const newEndDate = new Date(startDate);
-      newEndDate.setHours(startDate.getHours() + 1);
-      setEndDate(newEndDate);
-      try { console.debug('SelectDate.adjusted endDate=', newEndDate); } catch(e) {}
-      setValue("endDate", newEndDate);
-    } else {
-      try { console.debug('SelectDate.setValue endDate=', endDate); } catch(e) {}
-      setValue("endDate", endDate);
+    if (typeof window !== 'undefined') {
+      console.debug('[SelectDate] startDate changed (no auto-adjust)', { startDate: startDate.toISOString(), endDate: endDate.toISOString(), endAuto });
     }
-  }, [startDate, endDate, setValue]);
+    setValue("startDate", startDate);
+    prevStartRef.current = startDate;
+  }, [startDate]);
 
-  // Time options for select
+  // Keep form endDate in sync when endDate state changes (e.g., user edits time)
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      console.debug('[SelectDate] endDate changed', { endDate: endDate.toISOString(), endAuto });
+    }
+    setValue("endDate", endDate);
+  }, [endDate, setValue]);
+
   const hours = Array.from({ length: 12 }, (_, i) => (i === 0 ? 12 : i));
   const minutes = Array.from({ length: 60 }, (_, i) => i);
   const periods = ["AM", "PM"];
 
-  // Small wrapper component that closes the surrounding popover when a date is picked
   function CalendarWithClose(props: any) {
     const pop = usePopover();
     return (
@@ -131,18 +141,18 @@ export default function SelectDate({
   }
 
   return (
-    <div className="space-y-3">
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+    <div className="space-y-2">
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
         {/* Start Date Picker */}
-        <div className="space-y-2">
-          <Label htmlFor="startDate">Start Date</Label>
+        <div className="grid gap-1">
+          <Label htmlFor="startDate" className="text-sm">Start Date</Label>
           <Popover>
             <PopoverTrigger asChild>
               <Button
                 id="startDate"
                 variant="outline"
                 className={cn(
-                  "w-full justify-start text-left font-normal",
+                  "w-full justify-start text-left font-normal h-9 text-sm px-3",
                   !startDate && "text-muted-foreground"
                 )}
               >
@@ -172,15 +182,15 @@ export default function SelectDate({
         </div>
 
         {/* End Date Picker */}
-        <div className="space-y-2">
-          <Label htmlFor="endDate">End Date</Label>
+        <div className="grid gap-1">
+          <Label htmlFor="endDate" className="text-sm">End Date</Label>
           <Popover>
             <PopoverTrigger asChild>
               <Button
                 id="endDate"
                 variant="outline"
                 className={cn(
-                  "w-full justify-start text-left font-normal",
+                  "w-full justify-start text-left font-normal h-9 text-sm px-3",
                   !endDate && "text-muted-foreground"
                 )}
               >
@@ -195,12 +205,13 @@ export default function SelectDate({
                   if (date) {
                     const newDate = new Date(date);
                     newDate.setHours(
-                      endDate.getHours(),
-                      endDate.getMinutes(),
+                        endDate.getHours(),
+                        endDate.getMinutes(),
                       0,
                       0
                     );
-                    setEndDate(newDate);
+                      setEndDate(newDate);
+                      setEndAuto(false);
                   }
                 }}
                 initialFocus
@@ -210,150 +221,56 @@ export default function SelectDate({
         </div>
       </div>
 
-  <div className="flex flex-col gap-3">
-        {/* Start Time */}
-  <div className="space-y-1">
-          <Label>Start Time</Label>
-          <div className="flex space-x-2">
-            <Select
-              value={String(startHour12).padStart(2, '0')}
-              onValueChange={(value) => {
-                const hour12 = parseInt(value, 10);
-                setStartHour12(hour12);
-                const newHour24 = get24HourFormat(hour12, startPeriod);
-                const newDate = setHours(startDate, newHour24);
-                const newDateWithMinute = setMinutes(newDate, startMinute);
-                setStartDate(newDateWithMinute);
-              }}
-            >
-              <SelectTrigger className="w-[100px]">
-                <Clock className="mr-2 h-4 w-4" />
-                <SelectValue placeholder="Hour" />
-              </SelectTrigger>
-              <SelectContent className="h-[200px]">
-                {hours.map((hour) => (
-                  <SelectItem key={hour} value={String(hour).padStart(2, '0')}>
-                    {String(hour).padStart(2, '0')}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-            <Select
-              value={String(startMinute).padStart(2, '0')}
-              onValueChange={(value) => {
-                const minute = parseInt(value, 10);
-                setStartMinute(minute);
-                const newDate = setMinutes(startDate, minute);
+      <div className="flex flex-col gap-2">
+        {/* Start Time (freeform) */}
+        <div className="grid gap-1">
+          <Label className="text-sm">Start Time</Label>
+          <div className="flex gap-2 items-center">
+            <input
+              type="time"
+              className="h-9 px-3 border rounded-md text-sm"
+              value={format(startDate, 'HH:mm')}
+              onChange={(e) => {
+                const v = e.target.value; // HH:MM
+                const parts = v.split(':');
+                const hh = Number(parts[0]);
+                const mm = Number(parts[1]);
+                if (!Number.isFinite(hh) || !Number.isFinite(mm)) return;
+                const newDate = setHours(setMinutes(new Date(startDate), mm), hh);
                 setStartDate(newDate);
+                setStartMinute(mm);
+                setStartHour12(get12HourFormat(hh));
+                setStartPeriod(getPeriod(hh));
               }}
-            >
-              <SelectTrigger className="w-[100px]">
-                <SelectValue placeholder="Minute" />
-              </SelectTrigger>
-              <SelectContent className="h-[200px]">
-                {minutes.map((minute) => (
-                  <SelectItem key={minute} value={String(minute).padStart(2, '0')}>
-                    {String(minute).padStart(2, '0')}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-            <Select
-              value={startPeriod}
-              onValueChange={(value) => {
-                setStartPeriod(value);
-                const newHour24 = get24HourFormat(startHour12, value);
-                const newDate = setHours(startDate, newHour24);
-                setStartDate(newDate);
-              }}
-            >
-              <SelectTrigger className="w-[70px]">
-                <SelectValue placeholder="AM/PM" />
-              </SelectTrigger>
-              <SelectContent>
-                {periods.map((period) => (
-                  <SelectItem key={period} value={period}>
-                    {period}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-          <div className="text-xs text-gray-400">
-            Current time: {format(startDate, "hh:mm a")}
+            />
+            <div className="text-xs text-gray-400">{format(startDate, "hh:mm a")}</div>
           </div>
         </div>
 
-        {/* End Time */}
-  <div className="space-y-1">
-          <Label>End Time</Label>
-          <div className="flex space-x-2">
-            <Select
-              value={String(endHour12).padStart(2, '0')}
-              onValueChange={(value) => {
-                const hour12 = parseInt(value, 10);
-                setEndHour12(hour12);
-                const newHour24 = get24HourFormat(hour12, endPeriod);
-                const newDate = setHours(endDate, newHour24);
-                const newDateWithMinute = setMinutes(newDate, endMinute);
-                setEndDate(newDateWithMinute);
-              }}
-            >
-              <SelectTrigger className="w-[100px]">
-                <Clock className="mr-2 h-4 w-4" />
-                <SelectValue placeholder="Hour" />
-              </SelectTrigger>
-              <SelectContent className="h-[200px]">
-                {hours.map((hour) => (
-                  <SelectItem key={hour} value={String(hour).padStart(2, '0')}>
-                    {String(hour).padStart(2, '0')}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-            <Select
-              value={String(endMinute).padStart(2, '0')}
-              onValueChange={(value) => {
-                const minute = parseInt(value, 10);
-                setEndMinute(minute);
-                const newDate = setMinutes(endDate, minute);
+        {/* End Time (freeform) */}
+        <div className="grid gap-1">
+          <Label className="text-sm">End Time</Label>
+          <div className="flex gap-2 items-center">
+            <input
+              type="time"
+              className="h-9 px-3 border rounded-md text-sm"
+              value={format(endDate, 'HH:mm')}
+              onChange={(e) => {
+                const v = e.target.value;
+                const parts = v.split(':');
+                const hh = Number(parts[0]);
+                const mm = Number(parts[1]);
+                if (!Number.isFinite(hh) || !Number.isFinite(mm)) return;
+                const base = new Date(startDate);
+                const newDate = setHours(setMinutes(base, mm), hh);
                 setEndDate(newDate);
+                setEndMinute(mm);
+                setEndHour12(get12HourFormat(hh));
+                setEndPeriod(getPeriod(hh));
+                setEndAuto(false);
               }}
-            >
-              <SelectTrigger className="w-[100px]">
-                <SelectValue placeholder="Minute" />
-              </SelectTrigger>
-              <SelectContent className="h-[200px]">
-                {minutes.map((minute) => (
-                  <SelectItem key={minute} value={String(minute).padStart(2, '0')}>
-                    {String(minute).padStart(2, '0')}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-            <Select
-              value={endPeriod}
-              onValueChange={(value) => {
-                setEndPeriod(value);
-                const newHour24 = get24HourFormat(endHour12, value);
-                const newDate = setHours(endDate, newHour24);
-                setEndDate(newDate);
-              }}
-            >
-              <SelectTrigger className="w-[70px]">
-                <SelectValue placeholder="AM/PM" />
-              </SelectTrigger>
-              <SelectContent>
-                {periods.map((period) => (
-                  <SelectItem key={period} value={period}>
-                    {period}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-          <div className="text-xs text-gray-400">
-            Current time: {format(endDate, "hh:mm a")}
+            />
+            <div className="text-xs text-gray-400">{format(endDate, "hh:mm a")}</div>
           </div>
         </div>
       </div>

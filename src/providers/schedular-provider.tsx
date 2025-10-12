@@ -19,6 +19,10 @@ import {
   SchedulerContextType,
   startOfWeek,
 } from "@/types/index";
+// date helpers for week calculations
+import { getWeek } from 'date-fns/getWeek';
+import { startOfWeekYear } from 'date-fns/startOfWeekYear';
+import { addDays } from 'date-fns/addDays';
 import ModalProvider from "./modal-context";
 // Define event and state types
 
@@ -117,6 +121,11 @@ export const SchedulerProvider = ({
     }
   }, [initialState]);
 
+  // Normalize weekStartsOn to supported values and fall back to sensible default
+  // The settings UI uses 'monday' as its default, but some pages may pass 'sunday'.
+  // Accept only 'sunday' or 'monday'. If another value is provided, default to 'monday'.
+  const normalizedWeekStartsOn = weekStartsOn === 'sunday' ? 'sunday' : 'monday';
+
   // global getters
   const getDaysInMonth = (month: number, year: number) => {
     return Array.from(
@@ -129,49 +138,48 @@ export const SchedulerProvider = ({
   };
 
   const getDaysInWeek = (week: number, year: number) => {
-    // Determine if the week should start on Sunday (0) or Monday (1)
-    const startDay = weekStartsOn === "sunday" ? 0 : 1;
-
-    // Get January 1st of the year
-    const janFirst = new Date(year, 0, 1);
-
-    // Calculate how many days we are offsetting from January 1st
-    const janFirstDayOfWeek = janFirst.getDay();
-
-    // Calculate the start of the week by finding the correct day in the year
-    const weekStart = new Date(janFirst);
-    weekStart.setDate(
-      janFirst.getDate() +
-        (week - 1) * 7 +
-        ((startDay - janFirstDayOfWeek + 7) % 7)
-    );
+    // Use date-fns' startOfWeekYear to compute the first week start
+    // Respect provider's weekStartsOn option (0 = Sunday, 1 = Monday)
+  const startDay = normalizedWeekStartsOn === "sunday" ? 0 : 1;
+  const firstWeekStart = startOfWeekYear(new Date(year, 0, 1), { weekStartsOn: startDay });
+    const weekStart = addDays(firstWeekStart, (week - 1) * 7);
 
     // Generate the week's days
-    const days = [];
-    for (let i = 0; i < 7; i++) {
-      const day = new Date(weekStart);
-      day.setDate(day.getDate() + i);
-      days.push(day);
-    }
-
+    const days = Array.from({ length: 7 }, (_, i) => addDays(weekStart, i));
     return days;
   };
 
   const getWeekNumber = (date: Date) => {
-    const d = new Date(
-      Date.UTC(date.getFullYear(), date.getMonth(), date.getDate())
-    );
-    d.setUTCDate(d.getUTCDate() + 4 - (d.getUTCDay() || 7));
-    const yearStart = new Date(Date.UTC(d.getUTCFullYear(), 0, 1));
-    const weekNo = Math.ceil(
-      ((d.getTime() - yearStart.getTime()) / 86400000 + 1) / 7
-    );
-    return weekNo;
+    // Use date-fns getWeek which respects weekStartsOn and firstWeekContainsDate
+  const weekStartsOnOption = normalizedWeekStartsOn === "sunday" ? 0 : 1;
+    // firstWeekContainsDate default to 4 (ISO-like behavior) to keep consistency
+    return getWeek(date, { weekStartsOn: weekStartsOnOption, firstWeekContainsDate: 4 });
   };
 
   // Helper function to filter events for a specific day
   const getEventsForDay = (day: number, currentDate: Date) => {
-    return state?.events.filter((event) => {
+    // Create a view of events where we prefer localStorage-backed endDate when
+    // the server row doesn't include it. This allows the UI to reflect the
+    // user's chosen end time even if the DB/Prisma schema didn't persist it.
+    const adjustedEvents = (state?.events || []).map((event) => {
+      try {
+        if (typeof window !== 'undefined' && event && event.id) {
+          const key = `saved_event_${event.id}`;
+          const raw = localStorage.getItem(key);
+          if (raw) {
+            try {
+              const parsed = JSON.parse(raw);
+              if (parsed && parsed.endDate && (!event.endDate || String(event.endDate) !== String(parsed.endDate))) {
+                return { ...event, endDate: parsed.endDate };
+              }
+            } catch (e) {}
+          }
+        }
+      } catch (e) {}
+      return event;
+    });
+
+    return adjustedEvents.filter((event) => {
       const eventStart = new Date(event.startDate);
       const eventEnd = new Date(event.endDate);
 

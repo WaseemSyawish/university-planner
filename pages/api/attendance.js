@@ -573,7 +573,7 @@ function getDefaultPoints(status) {
     case 'ABSENT':
       return 0;
     case 'HOLIDAY':
-      return 0;
+      return null;
     default:
       return 0;
   }

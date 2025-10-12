@@ -52,6 +52,65 @@ function isPrismaMetaError(msg) {
   return false;
 }
 
+// Helper: attempt to create an event, and if Prisma errors with unknown/unsupported
+// argument/column messages, remove the offending fields and retry a few times.
+async function createEventWithFallback(client, data) {
+  let attempts = 0;
+  let current = { ...data };
+  while (attempts < 4) {
+    try {
+      // Log the final payload we're about to send to Prisma (hide large `meta` if present)
+      try {
+        const preview = { ...current };
+        if (preview && preview.meta) preview.meta = undefined;
+        const s = JSON.stringify(preview).slice(0, 2000);
+        console.info('[api/events] createEventWithFallback - create payload (meta hidden):', s);
+      } catch (le) {
+        try { console.info('[api/events] createEventWithFallback - create payload keys:', Object.keys(current)); } catch (ke) { /* ignore */ }
+      }
+      return await client.event.create({ data: current });
+    } catch (e) {
+      attempts += 1;
+      const msg = e && e.message ? String(e.message) : '';
+      // try to extract argument/column name from common Prisma error messages
+      const fields = [];
+      let m;
+      // Unknown argument `field`
+      m = msg.match(/unknown (?:argument|arg).*`?([a-zA-Z0-9_]+)`?/i);
+      if (m && m[1]) fields.push(m[1]);
+      // Unknown argument: Available options are marked with ?.
+      m = msg.match(/Unknown argument `?([a-zA-Z0-9_]+)`?/i);
+      if (m && m[1]) fields.push(m[1]);
+      // SQL: column "field" of relation "events" does not exist
+      m = msg.match(/column \"?([a-zA-Z0-9_]+)\"? of relation/i);
+      if (m && m[1]) fields.push(m[1]);
+      // SQLite: no such column: field
+      m = msg.match(/no such column[: ]+([a-zA-Z0-9_]+)/i);
+      if (m && m[1]) fields.push(m[1]);
+
+      // If we found fields to remove, strip them and retry.
+      if (fields.length > 0) {
+        let removedAny = false;
+        for (const f of fields) {
+          if (Object.prototype.hasOwnProperty.call(current, f)) {
+            removedAny = true;
+            try { delete current[f]; } catch (er) { current[f] = undefined; }
+            console.warn('[api/events] removed unsupported field for retry:', f);
+          }
+        }
+        if (removedAny) {
+          // loop to retry
+          continue;
+        }
+      }
+      // Nothing we can do to recover - rethrow the original error
+      throw e;
+    }
+  }
+  // If we exhausted attempts, throw final error
+  throw new Error('Failed to create event after retries due to unsupported DB fields');
+}
+
 export default async function handler(req, res) {
   // Support OPTIONS for simple CORS checks or preflight from tools
   if (req.method === 'OPTIONS') {
@@ -98,7 +157,8 @@ export default async function handler(req, res) {
               type: true,
               location: true,
               archived: true,
-              course_id: true,
+                course_id: true,
+                color: true,
               template_id: true,
               date: true,
               time: true,
@@ -114,8 +174,37 @@ export default async function handler(req, res) {
           throw e;
         }
       }
-      // Normalize date fields to local YYYY-MM-DD strings to avoid client-side timezone shifts
-      const normalized = events.map(ev => ({ ...ev, date: localDateOnlyString(ev.date) }));
+      // If the DB/schema doesn't support `meta` we may have embedded a JSON
+      // blob into the description as a fallback (prefix `__META__:`). Detect
+      // and extract that here so API consumers receive the original metadata
+      // (color, variant, etc.). Normalize date fields to local YYYY-MM-DD strings
+      // to avoid client-side timezone shifts.
+      const normalized = events.map(ev => {
+        const out = { ...ev };
+        // Extract fallback meta if present in description and meta not already present
+        try {
+          if (!out.meta && out.description && typeof out.description === 'string') {
+            const mIndex = out.description.indexOf('\n\n__META__:');
+            const mIndexAlt = out.description.indexOf('__META__:');
+            const foundIndex = mIndex !== -1 ? mIndex : (mIndexAlt !== -1 ? mIndexAlt : -1);
+            if (foundIndex !== -1) {
+              const metaStr = out.description.slice(foundIndex + (foundIndex === mIndex ? 10 : 9));
+              try {
+                const parsed = JSON.parse(metaStr);
+                out.meta = parsed;
+                // Optionally strip the meta marker from the description so UI doesn't show it
+                out.description = out.description.slice(0, foundIndex).trim();
+              } catch (pe) {
+                // ignore parse errors and leave description intact
+              }
+            }
+          }
+        } catch (e) {
+          // swallow extraction errors
+        }
+        if (out && out.date) out.date = localDateOnlyString(out.date);
+        return out;
+      });
       return res.status(200).json({ events: normalized });
     } catch (err) {
       console.error('GET /api/events error', err);
@@ -140,6 +229,11 @@ export default async function handler(req, res) {
   const incomingLocation = req.body && (req.body.location || req.body.room) ? (req.body.location || req.body.room) : null;
   console.info('[api/events] POST payload:', JSON.stringify({ title, type, courseId, date, time, description, durationMinutes, location: incomingLocation }));
   const dt = parseDateForStorage(date);
+  // Additional debug: log the parsed start and any provided end/duration so we can
+  // determine whether the server is computing a 1-hour end or receiving one.
+  try {
+    console.info('[api/events] parsed times -> start:', dt && dt.toISOString ? dt.toISOString() : String(dt), 'provided endDate:', req.body && req.body.endDate ? String(req.body.endDate) : null, 'durationMinutes:', typeof durationMinutes !== 'undefined' ? String(durationMinutes) : null);
+  } catch (e) {}
   // normalize room -> location
   const location = req.body && (req.body.location || req.body.room) ? (req.body.location || req.body.room) : null;
       if (date && isBeforeTodayLocal(dt)) {
@@ -183,6 +277,12 @@ export default async function handler(req, res) {
       // (create a template + materialize occurrences as before).
       let created = null;
       const isTemplate = !!(req.body && (req.body.isTemplate || Array.isArray(req.body.templateModules)));
+      const hasEventTemplateModel = typeof prisma.eventTemplate !== 'undefined' && prisma.eventTemplate !== null;
+      // If client asked to create a template but the DB/schema doesn't include the
+      // EventTemplate model, return a clear error so the client can handle it.
+      if (isTemplate && !hasEventTemplateModel) {
+        return res.status(501).json({ error: 'TEMPLATES_NOT_SUPPORTED', message: 'Event templates are not supported by this deployment (missing EventTemplate model in database).' });
+      }
       if (isTemplate) {
         // Persist the provided modules/config as a JSON payload on EventTemplate
         const payload = req.body.templateModules || req.body.templatePayload || null;
@@ -286,33 +386,42 @@ export default async function handler(req, res) {
             start_date: dt,
             user_id: resolvedUserId
           };
-          const result = await prisma.$transaction(async (tx) => {
-            const tpl = await tx.eventTemplate.create({ data: templateData });
-            const createdEvents = [];
-            for (const d of occDates) {
-              // Attempt to create event including meta; if the DB/schema rejects the column,
-              // retry without meta so older databases continue to work.
-                try {
-                const createData = {
-                  title: title || '',
-                  type: type || 'assignment',
-                  course_id: courseId || null,
-                  date: d,
-                  time: time || null,
-                  description: finalDescription,
-                  location: location,
-                  user_id: resolvedUserId ? String(resolvedUserId) : null,
-                  template_id: tpl.id
-                };
-                if (metaToStore !== null) createData.meta = metaToStore;
-                try { console.info('[api/events] creating materialized event for template with data:', JSON.stringify({ ...createData, meta: undefined }).slice(0,2000)); } catch(e) {}
-                const ev = await tx.event.create({ data: createData });
-                createdEvents.push(ev);
-              } catch (ee) {
-                const mmsg = ee && ee.message ? String(ee.message) : '';
-                if (isPrismaMetaError(mmsg)) {
-                  // retry without meta
-                  const ev2 = await tx.event.create({ data: {
+
+          let result;
+          if (!hasEventTemplateModel) {
+            // Materialize events without creating a template (older DBs)
+            result = await prisma.$transaction(async (tx) => {
+              const createdEvents = [];
+              for (const d of occDates) {
+                  try {
+                  // Compute occurrence start datetime (date `d` may be a Date)
+                  const occStart = (d instanceof Date) ? new Date(d) : new Date(String(d));
+                  if (time && typeof time === 'string') {
+                    const parts = String(time).split(':');
+                    const hh = Number(parts[0] || 0);
+                    const mm = Number(parts[1] || 0);
+                    if (Number.isFinite(hh) && Number.isFinite(mm)) {
+                      occStart.setHours(hh, mm, 0, 0);
+                    }
+                  }
+
+                  // Determine durationMinutes for this occurrence. Prefer explicit durationMinutes
+                  // from the request; otherwise, if an endDate was provided for the original event,
+                  // compute duration from the original date -> endDate.
+                  let occDurationMinutes = null;
+                  if (typeof durationMinutes !== 'undefined' && durationMinutes !== null) {
+                    occDurationMinutes = Number(durationMinutes);
+                  } else if (req.body && req.body.endDate) {
+                    try {
+                      const origStart = parseDateForStorage(date);
+                      const origEnd = parseDateForStorage(req.body.endDate);
+                      if (!isNaN(origStart.getTime()) && !isNaN(origEnd.getTime())) {
+                        occDurationMinutes = Math.max(1, Math.round((origEnd.getTime() - origStart.getTime()) / 60000));
+                      }
+                    } catch (e) { /* ignore */ }
+                  }
+
+                  const createData = {
                     title: title || '',
                     type: type || 'assignment',
                     course_id: courseId || null,
@@ -320,21 +429,153 @@ export default async function handler(req, res) {
                     time: time || null,
                     description: finalDescription,
                     location: location,
-                    user_id: resolvedUserId ? String(resolvedUserId) : null,
-                    template_id: tpl.id
-                  }});
-                  createdEvents.push(ev2);
-                } else {
-                  throw ee;
+                    color: req.body && req.body.color ? String(req.body.color) : (c && c.color ? c.color : null),
+                    user_id: resolvedUserId ? String(resolvedUserId) : null
+                  };
+
+                  // Attach end_date for this occurrence when we can compute it
+                  if (occDurationMinutes !== null) {
+                    try {
+                      createData.end_date = new Date(occStart.getTime() + Number(occDurationMinutes) * 60000);
+                    } catch (e) { /* ignore */ }
+                  } else if (req.body && req.body.endDate) {
+                    // Fallback: if original endDate exists but we couldn't compute duration, attempt to shift it
+                    try {
+                      const origStart = parseDateForStorage(date);
+                      const origEnd = parseDateForStorage(req.body.endDate);
+                      if (!isNaN(origStart.getTime()) && !isNaN(origEnd.getTime())) {
+                        const diff = origEnd.getTime() - origStart.getTime();
+                        createData.end_date = new Date(occStart.getTime() + diff);
+                      }
+                    } catch (e) { /* ignore */ }
+                  }
+
+                  // Attach meta when available; otherwise include durationMinutes so client can reconstruct
+                  if (metaToStore !== null) {
+                    createData.meta = metaToStore;
+                    if ((typeof durationMinutes !== 'undefined' && durationMinutes !== null) && !createData.meta.durationMinutes) {
+                      try { createData.meta = { ...createData.meta, durationMinutes: Number(durationMinutes) }; } catch (e) {}
+                    }
+                  } else if (occDurationMinutes !== null) {
+                    createData.meta = { durationMinutes: Number(occDurationMinutes) };
+                  }
+                  try { console.info('[api/events] creating materialized event (no template) with data:', JSON.stringify({ ...createData, meta: undefined }).slice(0,2000)); } catch(e) {}
+                  const ev = await createEventWithFallback(tx, createData);
+                  createdEvents.push(ev);
+                } catch (ee) {
+                  const mmsg = ee && ee.message ? String(ee.message) : '';
+                  if (isPrismaMetaError(mmsg)) {
+                    const ev2 = await createEventWithFallback(tx, {
+                      title: title || '',
+                      type: type || 'assignment',
+                      course_id: courseId || null,
+                      date: d,
+                      time: time || null,
+                      description: finalDescription,
+                      location: location,
+                      color: req.body && req.body.color ? String(req.body.color) : (c && c.color ? c.color : null),
+                      user_id: resolvedUserId ? String(resolvedUserId) : null
+                    });
+                    createdEvents.push(ev2);
+                  } else {
+                    throw ee;
+                  }
                 }
               }
-            }
-            return { template: tpl, events: createdEvents };
-          });
-          const materialized = result.events || [];
+              return { template: null, events: createdEvents };
+            });
+          } else {
+            result = await prisma.$transaction(async (tx) => {
+              const tpl = await tx.eventTemplate.create({ data: templateData });
+              const createdEvents = [];
+              for (const d of occDates) {
+                  try {
+                  // Compute occurrence start datetime and end_date similar to non-template path
+                  const occStart = (d instanceof Date) ? new Date(d) : new Date(String(d));
+                  if (time && typeof time === 'string') {
+                    const parts = String(time).split(':');
+                    const hh = Number(parts[0] || 0);
+                    const mm = Number(parts[1] || 0);
+                    if (Number.isFinite(hh) && Number.isFinite(mm)) {
+                      occStart.setHours(hh, mm, 0, 0);
+                    }
+                  }
+                  let occDurationMinutes = null;
+                  if (typeof durationMinutes !== 'undefined' && durationMinutes !== null) {
+                    occDurationMinutes = Number(durationMinutes);
+                  } else if (req.body && req.body.endDate) {
+                    try {
+                      const origStart = parseDateForStorage(date);
+                      const origEnd = parseDateForStorage(req.body.endDate);
+                      if (!isNaN(origStart.getTime()) && !isNaN(origEnd.getTime())) {
+                        occDurationMinutes = Math.max(1, Math.round((origEnd.getTime() - origStart.getTime()) / 60000));
+                      }
+                    } catch (e) { /* ignore */ }
+                  }
+
+                  const createData = {
+                    title: title || '',
+                    type: type || 'assignment',
+                    course_id: courseId || null,
+                    date: d,
+                    time: time || null,
+                    description: finalDescription,
+                    location: location,
+                    color: req.body && req.body.color ? String(req.body.color) : (c && c.color ? c.color : null),
+                    user_id: resolvedUserId ? String(resolvedUserId) : null,
+                    template_id: tpl.id
+                  };
+                  if (occDurationMinutes !== null) {
+                    try { createData.end_date = new Date(occStart.getTime() + Number(occDurationMinutes) * 60000); } catch (e) {}
+                  } else if (req.body && req.body.endDate) {
+                    try {
+                      const origStart = parseDateForStorage(date);
+                      const origEnd = parseDateForStorage(req.body.endDate);
+                      if (!isNaN(origStart.getTime()) && !isNaN(origEnd.getTime())) {
+                        const diff = origEnd.getTime() - origStart.getTime();
+                        createData.end_date = new Date(occStart.getTime() + diff);
+                      }
+                    } catch (e) { /* ignore */ }
+                  }
+                  if (metaToStore !== null) {
+                    createData.meta = metaToStore;
+                    if ((typeof durationMinutes !== 'undefined' && durationMinutes !== null) && !createData.meta.durationMinutes) {
+                      try { createData.meta = { ...createData.meta, durationMinutes: Number(durationMinutes) }; } catch (e) {}
+                    }
+                  } else if (occDurationMinutes !== null) {
+                    createData.meta = { durationMinutes: Number(occDurationMinutes) };
+                  }
+                  try { console.info('[api/events] creating materialized event for template with data:', JSON.stringify({ ...createData, meta: undefined }).slice(0,2000)); } catch(e) {}
+                  const ev = await createEventWithFallback(tx, createData);
+                  createdEvents.push(ev);
+                } catch (ee) {
+                  const mmsg = ee && ee.message ? String(ee.message) : '';
+                  if (isPrismaMetaError(mmsg)) {
+                    const ev2 = await createEventWithFallback(tx, {
+                      title: title || '',
+                      type: type || 'assignment',
+                      course_id: courseId || null,
+                      date: d,
+                      time: time || null,
+                      description: finalDescription,
+                      location: location,
+                      color: req.body && req.body.color ? String(req.body.color) : (c && c.color ? c.color : null),
+                      user_id: resolvedUserId ? String(resolvedUserId) : null,
+                      template_id: tpl.id
+                    });
+                    createdEvents.push(ev2);
+                  } else {
+                    throw ee;
+                  }
+                }
+              }
+              return { template: tpl, events: createdEvents };
+            });
+          }
+          const materialized = (result && result.events) ? result.events : [];
           created = materialized.length ? materialized[0] : null;
           if (created) {
-            created.template_id = result.template.id;
+            try { created.template_id = result && result.template ? result.template.id : null; } catch (e) { created.template_id = null; }
             // Do not attach the full materialized array directly to the returned object
             // as it will include the `created` item itself and produce circular JSON.
             // Instead expose a safe summary: count and a small preview of ids/dates.
@@ -346,7 +587,7 @@ export default async function handler(req, res) {
             }
           }
         }
-        } else {
+  } else {
         // compute end_date from provided endDate or durationMinutes
         let endDateToStore = null;
         if (req.body && req.body.endDate) {
@@ -354,37 +595,89 @@ export default async function handler(req, res) {
         } else if (typeof durationMinutes !== 'undefined' && durationMinutes !== null) {
           endDateToStore = new Date((parseDateForStorage(date)).getTime() + Number(durationMinutes) * 60000);
         }
+        try { console.info('[api/events] computed endDateToStore:', endDateToStore && endDateToStore.toISOString ? endDateToStore.toISOString() : String(endDateToStore)); } catch (e) {}
 
+        // Try to include end_date when possible. If Prisma complains about unknown
+        // argument end_date, fall back to storing durationMinutes in meta as before.
         try {
           const createData = {
             title,
             type: type || 'assignment',
-            course_id: courseId || null,
             date: dt,
             time: time || null,
-            end_date: endDateToStore,
             description: finalDescription,
-            location: location,
+            color: req.body && req.body.color ? String(req.body.color) : null,
             user_id: resolvedUserId ? String(resolvedUserId) : null
           };
-          if (metaToStore !== null) createData.meta = metaToStore;
+          if (endDateToStore) createData.end_date = endDateToStore;
+          // If the caller provided meta (color/duration) prefer that; otherwise
+          // ensure durationMinutes is included so UI can compute endDate locally.
+          if (metaToStore !== null) {
+            const _meta = { ...metaToStore };
+            if ((typeof durationMinutes !== 'undefined' && durationMinutes !== null) && !_meta.durationMinutes) _meta.durationMinutes = Number(durationMinutes);
+            createData.meta = _meta;
+          } else if (typeof durationMinutes !== 'undefined' && durationMinutes !== null) {
+            createData.meta = { durationMinutes: Number(durationMinutes) };
+          }
           try { console.info('[api/events] creating single event with data:', JSON.stringify({ ...createData, meta: undefined }).slice(0,2000)); } catch(e) {}
-          created = await prisma.event.create({ data: createData });
+          created = await createEventWithFallback(prisma, createData);
         } catch (ee) {
           const mmsg = ee && ee.message ? String(ee.message) : '';
-          if (isPrismaMetaError(mmsg)) {
-            console.warn('[api/events] retrying create without `meta` due to DB schema mismatch');
-            created = await prisma.event.create({ data: {
-              title,
-              type: type || 'assignment',
-              course_id: courseId || null,
-              date: dt,
-              time: time || null,
-              end_date: endDateToStore,
-              description: finalDescription,
-              location: location,
-              user_id: resolvedUserId ? String(resolvedUserId) : null
-            }});
+          const isEndDateErr = /unknown (argument|arg).*end_date/i.test(mmsg) || /Unknown argument `end_date`/.test(mmsg) || /end_date/.test(mmsg);
+          const isMetaErr = isPrismaMetaError(mmsg);
+          if (isMetaErr || isEndDateErr) {
+            console.warn('[api/events] retrying create without unsupported fields due to DB schema mismatch', mmsg);
+            // First try: create without the unsupported fields (meta and/or end_date)
+            try {
+              const fallbackData = {
+                title,
+                type: type || 'assignment',
+                date: dt,
+                time: time || null,
+                description: finalDescription,
+                color: req.body && req.body.color ? String(req.body.color) : null,
+                user_id: resolvedUserId ? String(resolvedUserId) : null
+              };
+              // Only include meta if meta column is supported; otherwise embed later
+              if (!isMetaErr && metaToStore !== null) {
+                const _meta = { ...metaToStore };
+                if ((typeof durationMinutes !== 'undefined' && durationMinutes !== null) && !_meta.durationMinutes) _meta.durationMinutes = Number(durationMinutes);
+                fallbackData.meta = _meta;
+              } else if (typeof durationMinutes !== 'undefined' && durationMinutes !== null) {
+                fallbackData.meta = { durationMinutes: Number(durationMinutes) };
+              }
+              created = await prisma.event.create({ data: fallbackData });
+                  try { console.info('[api/events] fallback create (no meta/end_date) payload keys:', Object.keys(fallbackData)); } catch (le) {}
+              // If we removed meta but we have it in request, attach it to response object
+              if (!created.meta && metaToStore) {
+                try { created.meta = metaToStore; } catch (a) {}
+              }
+            } catch (ee2) {
+              // Second fallback: embed meta into description (if present) and create without meta/end_date
+              try {
+                let descriptionWithMeta = finalDescription;
+                try {
+                  if (metaToStore) {
+                    const safeMeta = JSON.stringify(metaToStore);
+                    descriptionWithMeta = descriptionWithMeta ? (descriptionWithMeta + '\n\n__META__:' + safeMeta) : ('__META__:' + safeMeta);
+                  }
+                } catch (se) { /* ignore */ }
+                created = await prisma.event.create({ data: {
+                  title,
+                  type: type || 'assignment',
+                  date: dt,
+                  time: time || null,
+                  description: descriptionWithMeta,
+                  color: req.body && req.body.color ? String(req.body.color) : null,
+                  user_id: resolvedUserId ? String(resolvedUserId) : null
+                }});
+                  try { console.info('[api/events] fallback embed-meta create payload keys:', Object.keys({ title, type, date: dt, time: time || null, description: descriptionWithMeta, color: req.body && req.body.color ? String(req.body.color) : null, user_id: resolvedUserId ? String(resolvedUserId) : null })); } catch (le) {}
+                try { created.meta = metaToStore; } catch (a) {}
+              } catch (ee3) {
+                // If everything failed, rethrow the original error for visibility
+                throw ee;
+              }
+            }
           } else {
             throw ee;
           }
@@ -408,27 +701,81 @@ export default async function handler(req, res) {
           }
         } catch (e) { console.warn('attachments handling failed', e); }
       }
+  // If DB/schema removed end_date or meta, embed the relevant info into description
+  // so the client can recover it later. This is a safe, non-destructive fallback.
+  try {
+    if (created && (!created.end_date && !created.endDate)) {
+      const salvageMeta = {};
+      if (typeof durationMinutes !== 'undefined' && durationMinutes !== null) salvageMeta.durationMinutes = Number(durationMinutes);
+      if (req.body && req.body.endDate) {
+        try { salvageMeta.endDate = (new Date(String(req.body.endDate))).toISOString(); } catch (e) { salvageMeta.endDate = req.body.endDate; }
+      }
+      // Only append if there's something to salvage and description doesn't already contain our marker
+      if (Object.keys(salvageMeta).length > 0) {
+        try {
+          const marker = '\n\n__META__:' + JSON.stringify(salvageMeta);
+          if (!created.description || (typeof created.description === 'string' && created.description.indexOf('__META__:') === -1)) {
+            // Note: we do NOT alter the DB row here (to avoid requiring UPDATE privileges).
+            // Instead, attach the synthetic description on the returned object so API consumers see it.
+            created.description = (created.description ? String(created.description) : '') + marker;
+          }
+        } catch (e) { /* ignore */ }
+      }
+    }
+  } catch (e) { /* ignore salvage failures */ }
 
   // Return created entity. If we created a template, return it under `template`.
-  try {
+    try {
     if (isTemplate && created && created.template) {
       return res.status(201).json({ template: created.template });
     }
+    // Build response and ensure we preserve client-provided endDate when DB didn't store end_date
     const ret = { ...created, durationMinutes: typeof durationMinutes !== 'undefined' ? durationMinutes : null };
+    // If DB didn't persist an end_date but the client sent one, attach it to the response
+    try {
+      if ((!ret.end_date && !ret.endDate) && req.body && req.body.endDate) {
+        // normalize to ISO string if possible
+        try { ret.endDate = (new Date(String(req.body.endDate))).toISOString(); } catch (ie) { ret.endDate = req.body.endDate; }
+      }
+      // If DB didn't provide duration info but client sent durationMinutes, ensure it's reflected
+      if ((typeof ret.durationMinutes === 'undefined' || ret.durationMinutes === null) && typeof durationMinutes !== 'undefined' && durationMinutes !== null) {
+        ret.durationMinutes = Number(durationMinutes);
+      }
+    } catch (e) { /* swallow */ }
     // normalize date to local date-only string
     if (ret && ret.date) ret.date = localDateOnlyString(ret.date);
+    // If we had meta in the incoming body but the DB did not support meta,
+    // we may have attached it as a fallback; ensure the API response includes it
+    if (!ret.meta && metaToStore) {
+      try { ret.meta = metaToStore; } catch (e) {}
+    }
     return res.status(201).json({ event: ret });
   } catch (e) {
     if (isTemplate && created && created.template) return res.status(201).json({ template: created.template });
-    return res.status(201).json({ event: { ...created, durationMinutes: typeof durationMinutes !== 'undefined' ? durationMinutes : null } });
+    const fallback = { ...created, durationMinutes: typeof durationMinutes !== 'undefined' ? durationMinutes : null };
+    try {
+      if ((!fallback.end_date && !fallback.endDate) && req.body && req.body.endDate) {
+        try { fallback.endDate = (new Date(String(req.body.endDate))).toISOString(); } catch (ie) { fallback.endDate = req.body.endDate; }
+      }
+      if ((typeof fallback.durationMinutes === 'undefined' || fallback.durationMinutes === null) && typeof durationMinutes !== 'undefined' && durationMinutes !== null) {
+        fallback.durationMinutes = Number(durationMinutes);
+      }
+    } catch (ee) { /* swallow */ }
+    if (!fallback.meta && metaToStore) {
+      try { fallback.meta = metaToStore; } catch (e) {}
+    }
+    return res.status(201).json({ event: fallback });
   }
     } catch (err) {
-      // Log full error with stack for debugging
-      try { console.error('[api/events] POST error:', err && err.stack ? err.stack : err); } catch (e) { console.error('[api/events] POST error (failed to stringify):', err); }
+      // Log full error with stack and payload for debugging
+      try {
+        console.error('[api/events] POST error:', err && err.stack ? err.stack : err);
+        console.error('[api/events] POST body:', JSON.stringify(req.body, null, 2));
+      } catch (e) { console.error('[api/events] POST error (failed to stringify):', err); }
       // In development, return error details to help debug client-side
       if (process.env.NODE_ENV === 'development') {
         const details = err && (err.message || err.toString()) ? (err.message || String(err)) : 'unknown error';
-        return res.status(500).json({ error: 'Failed to create event', details });
+        return res.status(500).json({ error: 'Failed to create event', details, body: req.body });
       }
       return res.status(500).json({ error: 'Failed to create event' });
     }

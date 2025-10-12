@@ -15,6 +15,11 @@ export default async function handler(req, res) {
   const userId = await getUserId(req);
   if (!userId) return res.status(401).json({ error: 'Unauthorized' });
 
+  // Graceful fallback if EventTemplate model isn't present in Prisma schema.
+  if (typeof prisma.eventTemplate === 'undefined' || prisma.eventTemplate === null) {
+    return res.status(200).json({ templates: [] });
+  }
+
   if (req.method === 'GET') {
     try {
       const tpls = await prisma.eventTemplate.findMany({ where: { user_id: userId }, include: { events: true }, orderBy: { created_at: 'desc' } });

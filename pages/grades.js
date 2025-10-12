@@ -1,6 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import CustomSelect from '../src/components/CustomSelect';
-import { GraduationCap, TrendingUp, Award, BookOpen, Plus, Trash2, Edit2, X, ChevronDown, ChevronUp } from 'lucide-react';
+import { GraduationCap, TrendingUp, Award, BookOpen, Plus, Trash2, Edit2, X, ChevronDown, ChevronUp, ChevronLeft, ChevronRight } from 'lucide-react';
+import { Button } from '@/components/ui/button';
+import Head from 'next/head';
 
 const GradesPage = () => {
   const [selectedSemester, setSelectedSemester] = useState('all');
@@ -314,18 +316,28 @@ const GradesPage = () => {
 
   return (
     <div className="min-h-screen relative z-10 text-slate-900 dark:text-slate-100 dark:bg-[#071023]">
-      {/* Hero Section */}
-      <div className="bg-gradient-to-r from-purple-600 to-purple-800 text-white px-8 py-12 dark:from-[#2a1b4d] dark:to-[#07203a]">
-        <div className="max-w-7xl mx-auto">
-          <div className="flex items-center gap-4">
-            <GraduationCap className="w-12 h-12" />
+      <Head>
+        <title>Grades — University Planner</title>
+      </Head>
+      {/* Navbar: use the exact Calendar header markup/styles for consistency */}
+      <header className="bg-white/95 backdrop-blur-xl border-b border-slate-200/60 px-6 py-4 sticky top-0 z-40 shadow-sm">
+        <div className="flex items-center justify-between max-w-7xl mx-auto">
+          <div className="flex items-center gap-3">
+            <div className="w-11 h-11 bg-gradient-to-br from-purple-600 to-purple-700 rounded-xl flex items-center justify-center shadow-lg shadow-purple-500/20">
+              <GraduationCap className="w-6 h-6 text-white" />
+            </div>
             <div>
-              <h1 className="text-4xl font-bold">Academic Grades</h1>
-              <p className="text-purple-100 mt-2">Track assessments with custom grading categories</p>
+              <h1 className="text-xl font-bold text-slate-900 dark:text-slate-100">Academic Grades</h1>
+              <p className="text-xs text-slate-700 dark:text-slate-300">Track your course assessments</p>
             </div>
           </div>
+          <Button className="bg-gradient-to-r from-purple-600 to-purple-700 hover:from-purple-700 hover:to-purple-800 text-white shadow-lg shadow-purple-500/25 transition-all duration-200 hover:shadow-xl hover:shadow-purple-500/35 px-5 h-10 rounded-xl font-medium" onClick={() => { /* visual-only */ }}>
+            <Plus className="w-4 h-4 mr-2" />Create Category
+          </Button>
         </div>
-      </div>
+      </header>
+
+      {/* Hero Section removed to match Calendar header — page now flows directly into the stats/cards */}
 
       <div className="max-w-7xl mx-auto px-8 py-8">
         {/* Stats Cards */}
@@ -419,7 +431,7 @@ const GradesPage = () => {
                 <div className="flex justify-between items-start mb-4">
                   <div>
                     <p className="text-sm font-semibold text-purple-600">{course.code}</p>
-                    <h3 className="text-2xl font-bold text-slate-100 dark:text-gray-900 mt-1">{course.name}</h3>
+                    <h3 className="text-2xl font-bold text-slate-900 dark:text-slate-100 mt-1">{course.name}</h3>
                     <p className="text-sm text-gray-600 mt-1">{course.credits} Credits • {course.categories.length} Categories</p>
                   </div>
                   <div className={`px-6 py-3 rounded-lg text-xl font-bold ${getGradeBgColor(grade)}`}>
@@ -445,7 +457,7 @@ const GradesPage = () => {
                 <div className="border-t border-gray-200 my-4"></div>
 
                 <div className="flex justify-between items-center mb-3">
-                  <h4 className="font-semibold text-slate-100 dark:text-gray-900">Grading Categories</h4>
+                  <h4 className="font-semibold text-slate-900 dark:text-slate-100">Grading Categories</h4>
           <button 
                     onClick={() => openCategoryModal(course)}
             className="flex items-center gap-2 px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition-colors text-sm font-medium"
@@ -468,7 +480,7 @@ const GradesPage = () => {
                               <span className="text-2xl">{getCategoryIcon(category.type)}</span>
                               <div className="flex-1">
                                 <div className="flex items-center gap-2">
-                                  <h5 className="font-semibold text-slate-100 dark:text-gray-900">{category.name}</h5>
+                                  <h5 className="font-semibold text-slate-900 dark:text-slate-100">{category.name}</h5>
                                   <span className="text-sm text-gray-600 dark:text-slate-300">({category.weight}%)</span>
                                 </div>
                                 <p className="text-sm text-gray-600 dark:text-slate-300">
@@ -506,12 +518,12 @@ const GradesPage = () => {
                               return (
                                 <div key={item.id} className="flex items-center justify-between p-3 bg-white border border-gray-200 rounded-lg dark:bg-[#061422] dark:border-transparent">
                                   <div className="flex-1">
-                                    <p className="font-medium text-slate-100 dark:text-gray-900">{item.name}</p>
+                                    <p className="font-medium text-slate-900 dark:text-slate-100">{item.name}</p>
                                     <p className="text-sm text-gray-600 dark:text-slate-300">{item.score} / {item.maxScore} points</p>
                                   </div>
                                   <div className="flex items-center gap-3">
                                     <div className="text-right">
-                                      <p className="font-bold text-lg text-slate-100 dark:text-gray-900">{itemPercentage}%</p>
+                                      <p className="font-bold text-lg text-slate-900 dark:text-slate-100">{itemPercentage}%</p>
                                     </div>
                                     <button
                                       onClick={() => handleDeleteItem(course.id, category.id, item.id)}
@@ -552,7 +564,7 @@ const GradesPage = () => {
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
           <div className="bg-white rounded-xl shadow-2xl max-w-md w-full p-6 dark:bg-[#071423]">
             <div className="flex justify-between items-center mb-6">
-              <h3 className="text-2xl font-bold text-slate-100 dark:text-gray-900">Add Grading Category</h3>
+              <h3 className="text-2xl font-bold text-slate-900 dark:text-slate-100">Add Grading Category</h3>
               <button 
                 onClick={() => setShowCategoryModal(false)}
                 className="p-1 hover:bg-gray-100 rounded transition-colors dark:hover:bg-[#061422]"
@@ -634,7 +646,7 @@ const GradesPage = () => {
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
           <div className="bg-white rounded-xl shadow-2xl max-w-md w-full p-6 dark:bg-[#071423]">
             <div className="flex justify-between items-center mb-6">
-              <h3 className="text-2xl font-bold text-slate-100 dark:text-gray-900">Add Item</h3>
+              <h3 className="text-2xl font-bold text-slate-900 dark:text-slate-100">Add Item</h3>
               <button 
                 onClick={() => setShowItemModal(false)}
                 className="p-1 hover:bg-gray-100 rounded transition-colors dark:hover:bg-[#061422]"

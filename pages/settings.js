@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from 'react';
+import Head from 'next/head';
 import * as DropdownMenu from '@radix-ui/react-dropdown-menu';
 // CustomDropdown: dark-mode friendly select replacement
 function CustomDropdown({ value, options, onChange, label }) {
@@ -284,7 +285,7 @@ export default function Settings() {
 
   const sections = [
     { id: 'appearance', label: 'Appearance', icon: Palette },
-    { id: 'calendar', label: 'Calendar', icon: Calendar },
+    { id: 'timetable', label: 'Timetable', icon: Calendar },
     { id: 'notifications', label: 'Notifications', icon: Bell },
     { id: 'security', label: 'Security', icon: Shield },
     { id: 'preferences', label: 'Preferences', icon: SettingsIcon },
@@ -292,6 +293,9 @@ export default function Settings() {
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-gray-50 to-purple-50 dark:from-transparent dark:bg-gray-900 p-6">
+      <Head>
+        <title>Settings — University Planner</title>
+      </Head>
       <div className="max-w-6xl mx-auto">
         {/* Header */}
         <div className="mb-8">
@@ -416,15 +420,15 @@ export default function Settings() {
               </Card>
             )}
 
-            {/* Calendar Section */}
-            {activeSection === 'calendar' && (
+            {/* Timetable Section (formerly Calendar) */}
+            {activeSection === 'timetable' && (
               <Card>
                 <CardHeader>
                   <CardTitle className="flex items-center gap-2">
                     <Calendar className="w-5 h-5" />
-                    Calendar Settings
+                    Timetable Settings
                   </CardTitle>
-                  <CardDescription>Configure your calendar preferences</CardDescription>
+                  <CardDescription>Configure your timetable defaults and how views behave</CardDescription>
                 </CardHeader>
                 <CardContent className="space-y-6">
                   <div>

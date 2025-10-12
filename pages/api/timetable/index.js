@@ -22,6 +22,12 @@ export default async function handler(req, res) {
   const userId = await resolveUserId(req);
   if (!userId) return res.status(401).json({ error: 'Unauthorized' });
 
+  // If the Prisma client doesn't include the EventTemplate model (older DB schema),
+  // return an empty array so clients gracefully fall back to materialized events.
+  if (typeof prisma.eventTemplate === 'undefined' || prisma.eventTemplate === null) {
+    return res.status(200).json([]);
+  }
+
   try {
     if (req.method === 'GET') {
       // Return all templates for the user. Map payload to a friendly shape the client expects.

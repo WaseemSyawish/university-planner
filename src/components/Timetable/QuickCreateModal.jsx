@@ -36,18 +36,34 @@ export default function QuickCreateModal({ visible = true, slot, courseOptions =
   }));
   const modalRef = useRef(null);
   const inputRef = useRef(null);
+  const initializedRef = useRef(false);
   const [room, setRoom] = useState('');
   const [localRepeat, setLocalRepeat] = useState(repeatOption || 'every-week');
   const [showRepeatModal, setShowRepeatModal] = useState(false);
 
   useEffect(() => {
-    if (courseId) setForm(f => ({ ...f, selectedCourse: String(courseId) }));
-    if (courseOptions && courseOptions.length && !form.title) {
-      const c = courseOptions.find(c => String(c.id) === String(courseId)) || courseOptions[0];
-      if (c) setForm(f => ({ ...f, title: c.code || c.name || 'New Class' }));
-    }
-    if (slotTime) setForm(f => ({ ...f, startTime: slotTime }));
+    // Initialize form from provided slot only once per slot change. This avoids
+    // overwriting user edits if the parent re-renders or slot prop is stable.
+    // When slot changes, reset the initializedRef so we re-initialize for the
+    // new slot.
+    initializedRef.current = false;
+    setForm(f => {
+      const next = { ...f };
+      if (courseId) next.selectedCourse = String(courseId);
+      if (courseOptions && courseOptions.length && !next.title) {
+        const c = courseOptions.find(c => String(c.id) === String(courseId)) || courseOptions[0];
+        if (c) next.title = c.code || c.name || 'New Class';
+      }
+      // If slotTime present and the form doesn't already have a startTime, set it.
+      if (slotTime && !next.startTime) next.startTime = slotTime;
+      return next;
+    });
   }, [slot, courseOptions, courseId]);
+
+  // After initial mount, mark as initialized so subsequent renders don't overwrite
+  useEffect(() => {
+    if (!initializedRef.current) initializedRef.current = true;
+  }, []);
 
   // keep form.durationMinutes in sync (EventForm will compute it when start/end change)
 
@@ -91,6 +107,22 @@ export default function QuickCreateModal({ visible = true, slot, courseOptions =
       date, // keep as YYYY-MM-DD
       time: form.startTime || '09:00',
       endTime: form.endTime || '10:00',
+      // include ISO startDate/endDate so callers that expect datetimes (like handleCreateEvent)
+      // receive exact instants instead of needing to recompute from date+time.
+      startDate: (() => {
+        try {
+          const [y, m, d] = String(date).slice(0,10).split('-').map(Number);
+          const [sh, sm] = (form.startTime || '09:00').split(':').map(Number);
+          return new Date(y, (m||1)-1, d, sh || 9, sm || 0, 0).toISOString();
+        } catch (e) { return null; }
+      })(),
+      endDate: (() => {
+        try {
+          const [y, m, d] = String(date).slice(0,10).split('-').map(Number);
+          const [eh, em] = (form.endTime || '10:00').split(':').map(Number);
+          return new Date(y, (m||1)-1, d, eh || 10, em || 0, 0).toISOString();
+        } catch (e) { return null; }
+      })(),
       durationMinutes: form.durationMinutes || 60,
       repeatOption: localRepeat,
       type: 'class',

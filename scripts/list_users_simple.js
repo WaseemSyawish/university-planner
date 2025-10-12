@@ -1,0 +1,1 @@
+require('dotenv').config(); const { PrismaClient } = require('@prisma/client'); (async ()=>{ const p=new PrismaClient(); try{ const users = await p.user.findMany({ select: { id: true, email: true } }); console.log('USERS:\n', JSON.stringify(users, null, 2)); }catch(e){ console.error('ERR', e); } finally { await p.$disconnect(); } })();

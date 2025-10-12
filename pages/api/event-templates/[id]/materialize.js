@@ -63,6 +63,7 @@ export default async function handler(req, res) {
           date: itemDate,
           time: item.time || null,
           description: item.description || null,
+          color: item.color || tpl.color || null,
           user_id: tokenUserId,
           template_id: tpl.id
         };

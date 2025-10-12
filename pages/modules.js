@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
+import Head from 'next/head';
 import { Plus, Edit, Trash2, Save, X, BookOpen, Users, Calendar, Loader2, AlertCircle, GraduationCap, CheckCircle, Clock } from 'lucide-react';
 import Notification from '../src/components/Notification';
 
@@ -365,6 +366,9 @@ const ModulesManager = () => {
 
   return (
   <div className="modules-root min-h-screen bg-gradient-to-br from-indigo-50 to-purple-100 p-6">
+      <Head>
+        <title>Modules — University Planner</title>
+      </Head>
       <style>{`
         /* Dark mode overrides for Modules Manager */
         html.dark .min-h-screen.bg-gradient-to-br { background-image: none; background-color: #0b1220; }
@@ -815,17 +819,20 @@ const CourseCard = ({ course, onEdit, onDelete, isPrevious = false, isUpcoming =
   };
 
   return (
-  <div className={`border rounded-xl p-5 hover:shadow-lg transition-all duration-200 cozy ${
+  <div 
+    className={`course-card-container border rounded-xl hover:shadow-lg transition-all duration-200 cozy ${
       isPrevious ? 'opacity-75' : 'hover:-translate-y-1'
-    }`}>
-      <div className="flex items-start justify-between mb-4">
+    }`}
+    style={{ padding: '1.25rem' }}
+  >
+      <div className="course-card-header flex items-start justify-between mb-4 gap-3">
         <div className="flex items-center gap-3 flex-1 min-w-0">
           <div
             className="w-5 h-5 rounded-full flex-shrink-0 ring-2 ring-white shadow-sm"
             style={{ backgroundColor: course.color || '#3B82F6' }}
           />
           <div className="min-w-0 flex-1">
-            <h3 className="font-semibold text-gray-900 leading-tight truncate text-base">
+            <h3 className="font-semibold text-gray-900 leading-tight text-base break-words">
               {course.name}
             </h3>
             {course.code && (
@@ -833,7 +840,7 @@ const CourseCard = ({ course, onEdit, onDelete, isPrevious = false, isUpcoming =
             )}
           </div>
         </div>
-        <div className="flex items-center gap-2 ml-2">
+        <div className="flex items-center gap-2 flex-shrink-0">
           <button
             onClick={() => onEdit(course)}
             className="text-gray-400 hover:text-indigo-600 transition-colors p-1 rounded hover:bg-indigo-50"
@@ -851,7 +858,7 @@ const CourseCard = ({ course, onEdit, onDelete, isPrevious = false, isUpcoming =
         </div>
       </div>
 
-      <div className="space-y-3 text-sm text-gray-600">
+      <div className="course-card-body space-y-3 text-sm text-gray-600">
         {course.instructor && (
           <div className="flex items-center gap-2">
             <Users size={16} className="text-gray-400 flex-shrink-0" />

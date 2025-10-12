@@ -1,440 +1,373 @@
 "use client";
 
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useState, useMemo } from "react";
+import { CSSTransition } from 'react-transition-group';
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Textarea } from "@/components/ui/textarea";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
 import { Label } from "@/components/ui/label";
-import {
-  Select,
-  SelectTrigger,
-  SelectValue,
-  SelectContent,
-  SelectItem,
-} from "@/components/ui/select";
 import { cn } from "@/lib/utils";
-
 import { useModal } from "@/providers/modal-context";
+import RecurrenceModal from '@/components/schedule/_modals/recurrence-modal';
 import SelectDate from "@/components/schedule/_components/add-event-components/select-date";
 import { SubmitHandler, useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { EventFormData, eventSchema, Variant, Event } from "@/types/index";
 import { useScheduler } from "@/providers/schedular-provider";
-import { v4 as uuidv4 } from "uuid"; // Use UUID to generate event IDs
+import { v4 as uuidv4 } from "uuid";
+
+const COLORS = [
+  { key: "blue", name: "Blue", variant: "primary" as Variant, class: "bg-blue-600" },
+  { key: "red", name: "Red", variant: "danger" as Variant, class: "bg-red-600" },
+  { key: "green", name: "Green", variant: "success" as Variant, class: "bg-green-600" },
+  { key: "yellow", name: "Yellow", variant: "warning" as Variant, class: "bg-yellow-500" },
+];
 
 export default function AddEventModal({
   CustomAddEventModal,
 }: {
   CustomAddEventModal?: React.FC<{ register: any; errors: any }>;
 }) {
-  const { setClose, data } = useModal();
-
-  // Modal data is stored in the modal context under the modal id (default = 'default').
-  // Only use the 'default' modal's data to avoid accidentally treating the entire
-  // context map as the event payload.
-  const eventData = (data && (data.default ?? null)) as Event | undefined | null;
+  const { setClose, data, setOpen } = useModal();
+  const eventData = (data?.default ?? null) as Event | null | undefined;
+  const { handlers } = useScheduler();
 
   const [selectedColor, setSelectedColor] = useState<string>(
-    getEventColor(eventData?.variant || "primary")
+    (eventData as any)?.color || "blue"
   );
-
-  const { handlers } = useScheduler();
-  // read recurrence options from scheduler context (if provided)
-  const { recurrenceOptions } = useScheduler() as any;
-  const [selectedRecurrence, setSelectedRecurrence] = useState<string | null>('none');
   const [colorOpen, setColorOpen] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
+  // recurrence UI state
+  const [repeatEnabled, setRepeatEnabled] = useState(false);
+  const [selectedByDays, setSelectedByDays] = useState<number[]>([]); // 0..6
+  const [intervalWeeks, setIntervalWeeks] = useState<number>(1);
+  const [createTemplate, setCreateTemplate] = useState(false);
+  const [materializeCount, setMaterializeCount] = useState<number | null>(null);
+  const [materializeUntil, setMaterializeUntil] = useState<string | null>(null);
 
-  const {
-    register,
-    handleSubmit,
-    reset,
-    getValues,
-    formState: { errors },
-    setValue,
-  } = useForm<EventFormData>({
+  const { register, handleSubmit, reset, formState: { errors }, setValue, getValues } = useForm<EventFormData>({
     resolver: zodResolver(eventSchema),
     defaultValues: {
       title: "",
-      description: "",
       startDate: new Date(),
       endDate: new Date(),
       variant: eventData?.variant || "primary",
-      color: ((eventData as any)?.color) || "blue",
+      color: (eventData as any)?.color || "blue",
+      type: (eventData as any)?.type || "assignment",
     },
   });
 
-  // Reset the form on initialization
+  const [showInlineRecurrence, setShowInlineRecurrence] = useState(false);
+  const [modalPage, setModalPage] = useState<number>(0); // 0 = main form, 1 = recurrence page
+
+  // Memoize SelectDate data so the hook is called unconditionally here
+  const selectDateData = useMemo(() => ({
+    startDate: eventData?.startDate || new Date(),
+    endDate: eventData?.endDate || new Date(),
+  }), [eventData?.startDate, eventData?.endDate]);
+
+  // Only reset the form when the actual eventData object changes
+  // Avoid depending on the whole `data` map which may change identity on unrelated updates
   useEffect(() => {
     if (eventData) {
+      const color = (eventData as any)?.color || "blue";
       reset({
         title: eventData.title,
-        description: eventData.description || "",
         startDate: eventData.startDate,
         endDate: eventData.endDate,
         variant: eventData.variant || "primary",
-        color: ((eventData as any)?.color) || "blue",
+        color: color,
+        type: (eventData as any)?.type || "assignment",
       });
-      // sync the selected color visual state with incoming event data
-      try {
-        setSelectedColor(((eventData as any)?.color) || getEventColor(eventData.variant || "primary"));
-        // initialize recurrence select from incoming event (if present)
-        try { setSelectedRecurrence((eventData as any)?.recurrence?.id ?? 'none'); } catch (e) {}
-      } catch (e) {}
+      setSelectedColor(color);
     }
-  }, [data, reset]);
+  }, [eventData, reset]);
 
-  const colorOptions = [
-    { key: "blue", name: "Blue", swatch: 'bg-blue-600' },
-    { key: "red", name: "Red", swatch: 'bg-red-600' },
-    { key: "green", name: "Green", swatch: 'bg-green-600' },
-    { key: "yellow", name: "Yellow", swatch: 'bg-yellow-500' },
-  ];
-
-  function getEventColor(variant: Variant) {
-    switch (variant) {
-      case "primary":
-        return "blue";
-      case "danger":
-        return "red";
-      case "success":
-        return "green";
-      case "warning":
-        return "yellow";
-      default:
-        return "blue";
-    }
-  }
-
-  function getEventStatus(color: string) {
-    switch (color) {
-      case "blue":
-        return "primary";
-      case "red":
-        return "danger";
-      case "green":
-        return "success";
-      case "yellow":
-        return "warning";
-      default:
-        return "default";
-    }
-  }
-
-  const getButtonVariant = (color: string) => {
-    switch (color) {
-      case "blue":
-        return "default";
-      case "red":
-        return "destructive";
-      case "green":
-        return "success";
-      case "yellow":
-        return "warning";
-      default:
-        return "default";
-    }
+  const handleColorChange = (colorKey: string) => {
+    const color = COLORS.find(c => c.key === colorKey);
+    setSelectedColor(colorKey);
+    setValue("color", colorKey);
+    setValue("variant", color?.variant || "primary");
+    setColorOpen(false);
   };
 
   const onSubmit: SubmitHandler<EventFormData> = async (formData) => {
-    // assemble event object
-    const newEvent: Event = {
-      id: eventData?.id ? eventData.id : uuidv4(), // reuse id when editing
-      title: formData.title,
-      startDate: formData.startDate,
-      endDate: formData.endDate,
-      variant: formData.variant,
-      description: formData.description,
-      // include color in the in-memory event shape so callers/pages can persist it
-      ...( (formData as any).color ? { color: (formData as any).color } : {} ),
-      // include recurrence based on local selection (falls back to form field if set)
-      ...((selectedRecurrence && selectedRecurrence !== 'none') ? { recurrence: { id: selectedRecurrence } } : ((formData as any).recurrenceOption ? { recurrence: { id: (formData as any).recurrenceOption } } : {})),
-    };
+    setSaveError(null);
+    setSubmitting(true);
 
-    // Debug: log the event object and edit id (if any)
     try {
-      console.debug("[AddEventModal] submitting event:", {
-        event: newEvent,
-        editingId: eventData?.id,
-      });
-    } catch (e) {
-      // ignore console failures in old browsers
-    }
+      const newEvent: Event = {
+        id: eventData?.id || uuidv4(),
+        title: formData.title,
+        startDate: formData.startDate,
+        endDate: formData.endDate,
+        variant: formData.variant,
+        ...((formData as any).type && { type: (formData as any).type }),
+        ...((formData as any).color && { color: (formData as any).color }),
+      };
 
-  setSaveError(null);
-  setSubmitting(true);
-    try {
-      // Persist to server directly from the modal to guarantee the event is sent.
-      // This avoids cases where delegation paths don't reach the API.
-      try {
-        const toDateObj = (d:any) => (d instanceof Date ? d : new Date(String(d)));
-        const start = toDateObj(newEvent.startDate || new Date());
-        const end = toDateObj(newEvent.endDate || new Date(start.getTime() + 60 * 60 * 1000));
-        const pad = (n:number) => String(n).padStart(2, '0');
-        const localDate = `${start.getFullYear()}-${pad(start.getMonth() + 1)}-${pad(start.getDate())}`;
-        const time = `${pad(start.getHours())}:${pad(start.getMinutes())}`;
-        const durationMinutes = Math.max(1, Math.round((end.getTime() - start.getTime()) / 60000));
-
-        const meta:any = {};
-        if ((newEvent as any).color) meta.color = (newEvent as any).color;
-        if (newEvent.variant) meta.variant = newEvent.variant;
-        if (typeof durationMinutes !== 'undefined' && durationMinutes !== null) meta.durationMinutes = Number(durationMinutes);
-
-        const body: any = {
-          title: newEvent.title,
-          description: newEvent.description && String(newEvent.description).trim() ? String(newEvent.description) : null,
-          date: localDate,
-          time,
-          durationMinutes,
-          startDate: start instanceof Date ? start.toISOString() : start,
-          endDate: end instanceof Date ? end.toISOString() : end,
-        };
-        if (Object.keys(meta).length > 0) body.meta = meta;
-        const isDev = (typeof process !== 'undefined' && process.env && process.env.NODE_ENV === 'development');
-
-        if (!eventData?.id) {
-          const postBody: any = { ...body };
-          if ((newEvent as any).recurrence && (newEvent as any).recurrence.id && (newEvent as any).recurrence.id !== 'none') {
-            postBody.repeatOption = (newEvent as any).recurrence.id;
-            // Explicitly request materialization by default when creating repeating events from the UI
-            postBody.materialize = true;
-          }
-          if (isDev) postBody.userId = 'smoke_user';
-          const resp = await fetch('/api/events', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(postBody) });
-          if (!resp.ok) {
-            let text = '';
-            try { text = await resp.text(); } catch (e) { text = String(e); }
-            throw new Error('Create failed ' + resp.status + ' ' + text);
-          }
-          const payload = await resp.json().catch(() => null);
-          const serverEvent = payload && payload.event ? payload.event : payload;
-          const finalEvent: Event = {
-            ...newEvent,
-            id: serverEvent?.id ?? newEvent.id,
-            startDate: serverEvent?.startDate ?? newEvent.startDate,
-            endDate: serverEvent?.endDate ?? newEvent.endDate,
-          };
-          try { handlers.handleLocalAddEvent?.(finalEvent); } catch (e) {}
-        } else {
-          const id = eventData.id;
-          if ((newEvent as any).recurrence && (newEvent as any).recurrence.id && (newEvent as any).recurrence.id !== 'none') {
-            body.repeatOption = (newEvent as any).recurrence.id;
-            // When updating an event to be repeating, request materialization by default
-            body.materialize = true;
-          }
-          if (isDev) body.userId = 'smoke_user';
-          const resp = await fetch(`/api/events/${encodeURIComponent(id)}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
-          if (!resp.ok) {
-            // If the record no longer exists (404) and the user requested a recurrence,
-            // try creating a new repeating event (materialize=true) instead of failing.
-            let text = '';
-            try { text = await resp.text(); } catch (e) { text = String(e); }
-            const status = resp.status;
-            if (status === 404 && (newEvent as any).recurrence && (newEvent as any).recurrence.id && (newEvent as any).recurrence.id !== 'none') {
-              try {
-                const postBody: any = { ...body };
-                postBody.repeatOption = (newEvent as any).recurrence.id;
-                postBody.materialize = true;
-                if (isDev) postBody.userId = 'smoke_user';
-                const createResp = await fetch('/api/events', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(postBody) });
-                if (!createResp.ok) {
-                  let ctext = '';
-                  try { ctext = await createResp.text(); } catch (e) { ctext = String(e); }
-                  throw new Error('Create fallback failed ' + createResp.status + ' ' + ctext);
-                }
-                const payload = await createResp.json().catch(() => null);
-                const serverEvent = payload && payload.event ? payload.event : payload;
-                const finalEvent: Event = {
-                  ...newEvent,
-                  id: serverEvent?.id ?? newEvent.id,
-                  startDate: serverEvent?.startDate ?? newEvent.startDate,
-                  endDate: serverEvent?.endDate ?? newEvent.endDate,
-                };
-                try { handlers.handleLocalAddEvent?.(finalEvent); } catch (e) {}
-                // Close modal and return early (we already persisted via fallback)
-                setSaveError(null);
-                setTimeout(() => setClose(), 50);
-                setSubmitting(false);
-                return;
-              } catch (cfErr) {
-                // Fall through to throw the original update error if create fallback fails
-                console.warn('[AddEventModal] fallback create after missing event failed', cfErr);
-                throw new Error('Update failed ' + resp.status + ' ' + text);
-              }
-            }
-            throw new Error('Update failed ' + resp.status + ' ' + text);
-          }
-          const payload = await resp.json().catch(() => null);
-          const serverEvent = payload && payload.event ? payload.event : payload;
-          const finalEvent: Event = {
-            ...newEvent,
-            id,
-            startDate: serverEvent?.startDate ?? newEvent.startDate,
-            endDate: serverEvent?.endDate ?? newEvent.endDate,
-          };
-          try { handlers.handleLocalUpdateEvent?.(finalEvent); } catch (e) {}
+      // Debug: print payload before sending (both ISO and local-friendly)
+      if (typeof window !== 'undefined') {
+        try {
+          const s = new Date(newEvent.startDate);
+          const e = new Date(newEvent.endDate);
+          console.log('[AddEventModal] Submitting event:', {
+            startDateISO: s.toISOString(),
+            startLocal: s.toString(),
+            endDateISO: e.toISOString(),
+            endLocal: e.toString(),
+            repeatEnabled,
+            selectedByDays,
+            intervalWeeks,
+            createTemplate,
+            materializeCount,
+            materializeUntil,
+          });
+        } catch (err) {
+          console.log('[AddEventModal] Submitting event (raw):', { startDate: newEvent.startDate, endDate: newEvent.endDate });
         }
-      } catch (err) {
-        // rethrow so outer catch handles it
-        throw err;
       }
-      setSaveError(null);
+
+      const toDateObj = (d: any) => d instanceof Date ? d : new Date(String(d));
+      const start = toDateObj(newEvent.startDate);
+      const end = toDateObj(newEvent.endDate);
+      const pad = (n: number) => String(n).padStart(2, "0");
+      const localDate = `${start.getFullYear()}-${pad(start.getMonth() + 1)}-${pad(start.getDate())}`;
+      const time = `${pad(start.getHours())}:${pad(start.getMinutes())}`;
+      const durationMinutes = Math.max(1, Math.round((end.getTime() - start.getTime()) / 60000));
+
+      const body: any = {
+        title: newEvent.title,
+        description: newEvent.description?.trim() || null,
+        date: localDate,
+        time,
+        durationMinutes,
+        startDate: start.toISOString(),
+        endDate: end.toISOString(),
+        ...((formData as any).type && { type: (formData as any).type }),
+        ...(selectedColor && { color: selectedColor }),
+      };
+
+      // Attach a meta object so servers that support metadata can persist the
+      // exact end time and duration even if the DB schema doesn't have
+      // dedicated columns. This is non-destructive and backward-compatible.
+      try {
+        body.meta = { endDate: end.toISOString(), durationMinutes };
+      } catch (e) {}
+
+      // Recurrence fields (optional)
+      if (repeatEnabled) {
+        body.repeatOption = 'weekly';
+        if (selectedByDays && Array.isArray(selectedByDays) && selectedByDays.length > 0) body.byDays = selectedByDays;
+        if (intervalWeeks && Number(intervalWeeks) > 1) body.interval = Number(intervalWeeks);
+        // If user chose to save as template, set isTemplate; otherwise, if materializeCount provided, set materializeCount
+        if (createTemplate) body.isTemplate = true;
+        else if (materializeCount && Number(materializeCount) > 0) body.materializeCount = Number(materializeCount);
+        else if (materializeUntil) body.materializeUntil = String(materializeUntil);
+      }
+
+      const isDev = typeof process !== "undefined" && process.env?.NODE_ENV === "development";
+      if (isDev) body.userId = "smoke_user";
+
+      let serverEvent: any;
+      
+      if (!eventData?.id) {
+        // Log outgoing body for debugging
+        try { console.info('[AddEventModal] POST body:', JSON.stringify(body, null, 2)); } catch (e) {}
+        const resp = await fetch("/api/events", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(body),
+        });
+        if (!resp.ok) {
+          // Read the response body once (avoid double-read errors), then try to parse JSON
+          let errBody = null;
+          try {
+            const txt = await resp.text();
+            try { errBody = JSON.parse(txt); } catch (e) { errBody = txt; }
+          } catch (e) {
+            errBody = String(e || 'Failed to read error body');
+          }
+          console.error('[AddEventModal] server error response:', resp.status, errBody);
+          let errMessage = `Create failed ${resp.status}`;
+          if (errBody) {
+            if (typeof errBody === 'string') errMessage = `${errMessage}: ${errBody}`;
+            else if (errBody && (errBody.error || errBody.message)) errMessage = `${errBody.error || errBody.message}${errBody.details ? ': ' + errBody.details : ''}`;
+            else errMessage = `${errMessage}: ${JSON.stringify(errBody)}`;
+          }
+          throw new Error(errMessage);
+        }
+        const payload = await resp.json().catch(() => null);
+        serverEvent = payload?.event || payload;
+        const finalEvent: Event = {
+          ...newEvent,
+          id: serverEvent?.id || newEvent.id,
+          startDate: serverEvent?.startDate || newEvent.startDate,
+          // Preserve client-provided endDate first. If none, fall back to server-provided
+          // endDate, then to server durationMinutes when only a duration was stored.
+          endDate: serverEvent?.endDate || newEvent.endDate || (serverEvent && serverEvent.durationMinutes && (serverEvent.startDate || newEvent.startDate) ? new Date(new Date(serverEvent.startDate || newEvent.startDate).getTime() + Number(serverEvent.durationMinutes) * 60000).toISOString() : newEvent.endDate),
+          ...(serverEvent?.color && { color: serverEvent.color }),
+        };
+        handlers.handleLocalAddEvent?.(finalEvent);
+        // Persist a local backup so that if the DB didn't store endDate we can
+        // still show the user's saved end time locally after a refresh.
+        try {
+          if (typeof window !== 'undefined' && finalEvent && finalEvent.id) {
+            localStorage.setItem(`saved_event_${finalEvent.id}`, JSON.stringify({ endDate: finalEvent.endDate, durationMinutes }));
+          }
+        } catch (e) {}
+      } else {
+        try { console.info('[AddEventModal] PATCH body:', JSON.stringify(body, null, 2)); } catch (e) {}
+        const resp = await fetch(`/api/events/${encodeURIComponent(eventData.id)}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(body),
+        });
+        if (!resp.ok) {
+          let errBody = null;
+          try {
+            const txt = await resp.text();
+            try { errBody = JSON.parse(txt); } catch (e) { errBody = txt; }
+          } catch (e) {
+            errBody = String(e || 'Failed to read error body');
+          }
+          console.error('[AddEventModal] server error response (PATCH):', resp.status, errBody);
+          let errMessage = `Update failed ${resp.status}`;
+          if (errBody) {
+            if (typeof errBody === 'string') errMessage = `${errMessage}: ${errBody}`;
+            else if (errBody && (errBody.error || errBody.message)) errMessage = `${errBody.error || errBody.message}${errBody.details ? ': ' + errBody.details : ''}`;
+            else errMessage = `${errMessage}: ${JSON.stringify(errBody)}`;
+          }
+          throw new Error(errMessage);
+        }
+        const payload = await resp.json().catch(() => null);
+        serverEvent = payload?.event || payload;
+        const finalEvent: Event = {
+          ...newEvent,
+          id: eventData.id,
+          startDate: serverEvent?.startDate || newEvent.startDate,
+          // Preserve client-provided endDate if present; otherwise prefer server endDate
+          // and finally compute from server durationMinutes if that's all we have.
+          endDate: serverEvent?.endDate || newEvent.endDate || (serverEvent && serverEvent.durationMinutes && (serverEvent.startDate || newEvent.startDate) ? new Date(new Date(serverEvent.startDate || newEvent.startDate).getTime() + Number(serverEvent.durationMinutes) * 60000).toISOString() : newEvent.endDate),
+          ...(serverEvent?.color && { color: serverEvent.color }),
+        };
+        handlers.handleLocalUpdateEvent?.(finalEvent);
+        try {
+          if (typeof window !== 'undefined' && finalEvent && finalEvent.id) {
+            localStorage.setItem(`saved_event_${finalEvent.id}`, JSON.stringify({ endDate: finalEvent.endDate, durationMinutes }));
+          }
+        } catch (e) {}
+      }
       setTimeout(() => setClose(), 50);
     } catch (err) {
-      // surface error to the user
-      try { setSaveError(err && err.message ? String(err.message) : String(err)); } catch (e) {}
-      setSubmitting(false);
-      return;
+      setSaveError(err instanceof Error ? err.message : String(err));
     } finally {
       setSubmitting(false);
     }
   };
 
-  // helper to await handler if it returns a promise
-  function awaitMaybe(fn: any, ...args: any[]) {
-    try {
-      const res = fn(...args);
-      if (res && typeof res.then === 'function') return res;
-      return Promise.resolve(res);
-    } catch (e) {
-      // propagate synchronous exceptions as rejected promise so callers can catch
-      return Promise.reject(e);
-    }
+  // If user navigated to recurrence page, show recurrence UI as the whole modal content
+  // Only render one page at a time
+  if (modalPage === 1) {
+    return (
+      <div className="flex flex-col gap-3 p-4">
+        <RecurrenceModal
+          inline
+          initial={{ byDays: selectedByDays, interval: intervalWeeks, isTemplate: createTemplate, materializeCount, materializeUntil, startDate: (function(){ const v = getValues('startDate'); return v instanceof Date ? v.toISOString() : (v ? String(v) : new Date().toISOString()); })() }}
+          onSave={(rdata: any) => {
+            setSelectedByDays(rdata.byDays || []);
+            setIntervalWeeks(rdata.interval || 1);
+            setCreateTemplate(!!rdata.isTemplate);
+            setMaterializeCount(rdata.materializeCount || null);
+            setMaterializeUntil(rdata.materializeUntil || null);
+            setRepeatEnabled(true);
+            setModalPage(0);
+          }}
+          onBack={() => setModalPage(0)}
+          onCancel={() => setModalPage(0)}
+        />
+      </div>
+    );
   }
 
+  // Main form page
   return (
-  <form className="flex flex-col gap-3 p-3" onSubmit={handleSubmit(onSubmit)}>
+    <form className="flex flex-col gap-3 p-4 bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-200" onSubmit={handleSubmit(onSubmit)}>
       {CustomAddEventModal ? (
         <CustomAddEventModal register={register} errors={errors} />
       ) : (
         <>
           <div className="grid gap-1">
-            <Label htmlFor="title">Event Name</Label>
-            <Input
-              id="title"
-              {...register("title")}
-              placeholder="Enter event name"
-              className={cn(errors.title && "border-red-500")}
-            />
-            {errors.title && (
-              <p className="text-sm text-red-500">
-                {errors.title.message as string}
-              </p>
-            )}
+            <Label htmlFor="title" className="text-sm dark:text-slate-200">Event Name</Label>
+            <Input id="title" {...register("title")} placeholder="Enter event name" className={cn("h-9 bg-white dark:bg-slate-800", errors.title && "border-red-500")} />
+            {errors.title && <p className="text-xs text-red-500">{errors.title.message as string}</p>}
           </div>
+
+          {/* Description removed to conserve space */}
 
           <div className="grid gap-1">
-            <Label htmlFor="description">Description</Label>
-            <Textarea
-              id="description"
-              {...register("description")}
-              placeholder="Enter event description"
-            />
+            {/**
+             * Pass the memoized data we created above. Calling hooks like
+             * useMemo inside JSX conditionally caused the hooks mismatch error.
+             */}
+            <SelectDate data={selectDateData} setValue={setValue} />
           </div>
 
-          <SelectDate
-            data={{
-              startDate: eventData?.startDate || new Date(),
-              endDate: eventData?.endDate || new Date(),
-            }}
-            setValue={setValue}
-          />
-
-          {/* Place recurrence selector beside color control on a single row for compact layout */}
-          <div className="flex items-start gap-4">
-            {Array.isArray(recurrenceOptions) && recurrenceOptions.length > 0 && (
-              <div className="flex-1 min-w-[220px]">
-                <Label htmlFor="recurrence">Repeat</Label>
-                <div className="mt-1">
-                  <Select
-                    value={selectedRecurrence ?? undefined}
-                    onValueChange={(val) => {
-                      try { setSelectedRecurrence(val); } catch (e) {}
-                      try { setValue('recurrenceOption' as any, val); } catch (e) {}
-                    }}
-                  >
-                    <SelectTrigger>
-                      <SelectValue placeholder="One time" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {/* Only include a default 'none' option if recurrenceOptions doesn't already provide it */}
-                      {!(Array.isArray(recurrenceOptions) && recurrenceOptions.some((o: any) => String(o.id) === 'none')) && (
-                        <SelectItem value="none">One time event</SelectItem>
-                      )}
-                      {recurrenceOptions.map((opt: any) => (
-                        <SelectItem key={opt.id} value={opt.id}>{opt.label}</SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
+          {/* Recurrence: open a dedicated modal to configure recurrence */}
+          <div className="grid gap-2">
+            <div className="flex items-center justify-between">
+              <Label className="text-sm dark:text-slate-200">Repeat</Label>
+              <div>
+                <button type="button" onClick={() => {
+                  // switch the modal to the recurrence page
+                  setModalPage(1);
+                }} className="h-9 px-3 rounded-md border text-sm">Configure recurrence</button>
               </div>
+            </div>
+            {/* show a small summary line when recurrence is configured */}
+            {selectedByDays && selectedByDays.length > 0 && (
+              <div className="text-xs text-gray-500 dark:text-slate-300">Repeats weekly on: {selectedByDays.map(d => ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'][d]).join(', ')}</div>
             )}
+          </div>
 
-            <div className="w-48">
-              <div className="grid gap-2 relative">
-                <Label>Color</Label>
-                <div>
-                  <div className="inline-block relative">
-                    <button type="button" onClick={() => setColorOpen(!colorOpen)} className="inline-flex items-center gap-2" aria-haspopup="menu" aria-expanded={colorOpen}>
-                      <span
-                        className={`inline-flex items-center justify-center ${colorOptions.find(c => c.key === selectedColor)?.swatch || 'bg-purple-600'} text-white px-3 py-1 rounded-full ring-1 ring-gray-200 shadow-sm text-sm font-medium transition-colors duration-150 ease-out`}
-                      >{colorOptions.find((color) => color.key === selectedColor)?.name}</span>
-                    </button>
-                    {colorOpen && (
-                    <div className="absolute mt-1 right-0 bg-white border rounded shadow-md py-1" style={{ minWidth: 140 }}>
-                      {colorOptions.map((color) => (
-                        <div
-                          key={color.key}
-                          onClick={() => {
-                            setSelectedColor(color.key);
-                            setValue("variant", getEventStatus(color.key));
-                            setValue("color", color.key);
-                            setColorOpen(false);
-                          }}
-                          className={`flex items-center gap-3 px-3 py-2 hover:bg-gray-50 cursor-pointer ${selectedColor === color.key ? 'bg-gray-50' : ''}`}
-                        >
-                          <div className={`${color.swatch} w-3.5 h-3.5 rounded-full`} />
-                          <div className="flex-1 text-sm">{color.name}</div>
-                          {selectedColor === color.key && (
-                            <svg className="h-4 w-4 text-indigo-600" viewBox="0 0 20 20" fill="none" aria-hidden>
-                              <path d="M5 10l3 3 7-7" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
-                            </svg>
-                          )}
-                        </div>
-                      ))}
-                    </div>
-                    )}
+          <div className="grid grid-cols-2 gap-3">
+            <div className="grid gap-1">
+              <Label htmlFor="type" className="text-sm dark:text-slate-200">Type</Label>
+              <select id="type" {...register("type")} className="h-9 px-2 border rounded-md text-sm bg-white dark:bg-slate-800 text-slate-900 dark:text-slate-200">
+                <option value="lecture">Lecture</option>
+                <option value="assignment">Assignment</option>
+                <option value="deadline">Deadline</option>
+                <option value="personal">Personal</option>
+              </select>
+            </div>
+
+            <div className="grid gap-1">
+              <Label className="text-sm">Color</Label>
+              <div className="relative">
+                <button type="button" onClick={() => setColorOpen(!colorOpen)} className={cn("h-9 w-full text-white px-3 rounded-md text-sm font-medium", COLORS.find(c => c.key === selectedColor)?.class)}>
+                  {COLORS.find(c => c.key === selectedColor)?.name}
+                </button>
+                {colorOpen && (
+                  <div className="absolute z-10 mt-1 w-full bg-white dark:bg-slate-800 border rounded-md shadow-lg py-0.5">
+                    {COLORS.map((color) => (
+                      <button key={color.key} type="button" onClick={() => handleColorChange(color.key)} className="w-full text-left px-3 py-1.5 text-sm hover:bg-gray-100 dark:hover:bg-slate-700">
+                        {color.name}
+                      </button>
+                    ))}
                   </div>
-                </div>
+                )}
               </div>
             </div>
           </div>
 
-          <div className="mt-2 pt-0">
-            <div className="h-px bg-gray-100 mb-1" />
-            <div className="flex justify-end space-x-3 -mt-0.5">
-              <Button variant="outline" type="button" onClick={() => setClose()} className="px-3 py-1.5 text-sm">
-                Cancel
-              </Button>
-              <Button type="submit" disabled={submitting} className="px-3 py-1.5 text-sm">{submitting ? 'Saving…' : 'Save Event'}</Button>
-            </div>
-            {saveError && (
-              <div className="text-sm text-red-600 mt-2">{saveError}</div>
-            )}
-          </div>
+          {saveError && <div className="p-2 bg-red-50 dark:bg-red-900 border border-red-200 dark:border-red-700 rounded text-xs text-red-600 dark:text-red-300">{saveError}</div>}
 
-          {/* development helper removed */}
+          <div className="flex justify-end gap-2 pt-2">
+            <Button variant="outline" type="button" onClick={() => setClose()} className="h-9">Cancel</Button>
+            <Button type="submit" disabled={submitting} className="h-9">{submitting ? "Saving..." : "Save Event"}</Button>
+          </div>
         </>
       )}
     </form>
   );
 }
-
-  // Dev helper removed

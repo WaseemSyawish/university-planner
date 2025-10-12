@@ -168,6 +168,18 @@ export default function DailyView({
   const { setOpen } = useModal();
   const { getters, handlers } = useScheduler();
 
+  // Listen for external 'go to date' requests (e.g., header Today button)
+  React.useEffect(() => {
+    function onGoToDate(e: any) {
+      try {
+        const d = e?.detail?.date ? new Date(String(e.detail.date)) : new Date();
+        setCurrentDate(d);
+      } catch (err) {}
+    }
+    window.addEventListener('scheduler:goToDate', onGoToDate as any);
+    return () => window.removeEventListener('scheduler:goToDate', onGoToDate as any);
+  }, []);
+
   const handleMouseMove = useCallback(
     (e: React.MouseEvent<HTMLDivElement, MouseEvent>) => {
       if (!hoursColumnRef.current) return;
@@ -205,82 +217,82 @@ export default function DailyView({
   // Calculate time groups once for all events
   const timeGroups = groupEventsByTimePeriod(dayEvents);
 
-    // Simple Mina-style minutes-based layout helper (keeps logic local and minimal)
-    const computeMinaStyle = (event: Event, allDayEvents: Event[] | undefined) => {
-      const ROW_PX_PER_HOUR = 64; // must match the hour row height used in the markup (h-[64px])
-      const ensureDate = (d: any) => (d instanceof Date ? d : new Date(d));
+  // Simple Mina-style minutes-based layout helper (keeps logic local and minimal)
+  const computeMinaStyle = (event: Event, allDayEvents: Event[] | undefined) => {
+    const ROW_PX_PER_HOUR = 64; // must match the hour row height used in the markup (h-[64px])
+    const ensureDate = (d: any) => (d instanceof Date ? d : new Date(d));
 
-      const items = (allDayEvents || [])
-        .filter((ev) => ev && ev.startDate && ev.endDate)
-        .map((ev) => {
-          const s = ensureDate(ev.startDate);
-          const e = ensureDate(ev.endDate);
-          const startMinutes = s.getHours() * 60 + s.getMinutes();
-          const endMinutes = e.getHours() * 60 + e.getMinutes();
-          const duration = Math.max(1, endMinutes - startMinutes);
-          return { ev, startMinutes, endMinutes, duration };
-        })
-        .sort((a, b) => a.startMinutes - b.startMinutes || b.endMinutes - a.endMinutes);
+    const items = (allDayEvents || [])
+      .filter((ev) => ev && ev.startDate && ev.endDate)
+      .map((ev) => {
+        const s = ensureDate(ev.startDate);
+        const e = ensureDate(ev.endDate);
+        const startMinutes = s.getHours() * 60 + s.getMinutes();
+        const endMinutes = e.getHours() * 60 + e.getMinutes();
+        const duration = Math.max(1, endMinutes - startMinutes);
+        return { ev, startMinutes, endMinutes, duration };
+      })
+      .sort((a, b) => a.startMinutes - b.startMinutes || b.endMinutes - a.endMinutes);
 
-      const columns: Array<Array<any>> = [];
-      const columnsIndexMap: number[] = [];
-      items.forEach((it, idx) => {
-        let placed = false;
-        for (let ci = 0; ci < columns.length; ci++) {
-          const col = columns[ci];
-          const last = col[col.length - 1];
-          if (it.startMinutes >= last.endMinutes) {
-            col.push(it);
-            columnsIndexMap[idx] = ci;
-            placed = true;
-            break;
-          }
-        }
-        if (!placed) {
-          columnsIndexMap[idx] = columns.length;
-          columns.push([it]);
-        }
-      });
-
-      const totalCols = Math.max(1, columns.length);
-
-      const thisStart = ensureDate(event.startDate);
-      const thisEnd = ensureDate(event.endDate);
-      const thisStartMin = thisStart.getHours() * 60 + thisStart.getMinutes();
-      const thisEndMin = thisEnd.getHours() * 60 + thisEnd.getMinutes();
-      const thisDuration = Math.max(1, thisEndMin - thisStartMin);
-
-      // find which column this event belongs to by matching ids
-      let colIndex = 0;
+    const columns: Array<Array<any>> = [];
+    const columnsIndexMap: number[] = [];
+    items.forEach((it, idx) => {
+      let placed = false;
       for (let ci = 0; ci < columns.length; ci++) {
-        if (columns[ci].some((it) => it.ev.id === event.id)) {
-          colIndex = ci;
+        const col = columns[ci];
+        const last = col[col.length - 1];
+        if (it.startMinutes >= last.endMinutes) {
+          col.push(it);
+          columnsIndexMap[idx] = ci;
+          placed = true;
           break;
         }
       }
+      if (!placed) {
+        columnsIndexMap[idx] = columns.length;
+        columns.push([it]);
+      }
+    });
 
-      const widthPercent = 100 / totalCols;
-      const leftPercent = colIndex * widthPercent;
+    const totalCols = Math.max(1, columns.length);
 
-  // Round/ceil pixel values to avoid subpixel gaps caused by fractional
-  // computations and different device pixel ratios. Add a 1px buffer to
-  // height to ensure the colored surface reaches the grid line below.
-  const rawTop = (thisStartMin / 60) * ROW_PX_PER_HOUR;
-  const rawHeight = (thisDuration / 60) * ROW_PX_PER_HOUR;
-  const topPx = Math.max(0, Math.floor(rawTop));
-  // Ensure minimal visible height and add a small buffer to avoid 1px gaps
-  const heightPx = Math.max(20, Math.ceil(rawHeight) + 1);
+    const thisStart = ensureDate(event.startDate);
+    const thisEnd = ensureDate(event.endDate);
+    const thisStartMin = thisStart.getHours() * 60 + thisStart.getMinutes();
+    const thisEndMin = thisEnd.getHours() * 60 + thisEnd.getMinutes();
+    const thisDuration = Math.max(1, thisEndMin - thisStartMin);
 
-      return {
-        height: `${heightPx}px`,
-        top: `${topPx}px`,
-        zIndex: colIndex + 1,
-        left: `${leftPercent}%`,
-        maxWidth: `${widthPercent}%`,
-        minWidth: `${widthPercent}%`,
-        _debug: { startMinutes: thisStartMin, endMinutes: thisEndMin, durationMinutes: thisDuration, topPx, heightPx }
-      };
+    // find which column this event belongs to by matching ids
+    let colIndex = 0;
+    for (let ci = 0; ci < columns.length; ci++) {
+      if (columns[ci].some((it) => it.ev.id === event.id)) {
+        colIndex = ci;
+        break;
+      }
+    }
+
+    const widthPercent = 100 / totalCols;
+    const leftPercent = colIndex * widthPercent;
+
+    // Round/ceil pixel values to avoid subpixel gaps caused by fractional
+    // computations and different device pixel ratios. Add a 1px buffer to
+    // height to ensure the colored surface reaches the grid line below.
+    const rawTop = (thisStartMin / 60) * ROW_PX_PER_HOUR;
+    const rawHeight = (thisDuration / 60) * ROW_PX_PER_HOUR;
+    const topPx = Math.max(0, Math.floor(rawTop));
+    // Ensure minimal visible height and add a small buffer to avoid 1px gaps
+    const heightPx = Math.max(20, Math.ceil(rawHeight) + 1);
+
+    return {
+      height: `${heightPx}px`,
+      top: `${topPx}px`,
+      zIndex: colIndex + 1,
+      left: `${leftPercent}%`,
+      maxWidth: `${widthPercent}%`,
+      minWidth: `${widthPercent}%`,
+      _debug: { startMinutes: thisStartMin, endMinutes: thisEndMin, durationMinutes: thisDuration, topPx, heightPx }
     };
+  };
 
   function handleAddEvent(event?: Event) {
     // Create the modal content with the provided event data or defaults
@@ -288,7 +300,6 @@ export default function DailyView({
     const endDate = event?.endDate || new Date();
 
     // Open the modal with the content
-
     setOpen(
       <CustomModal title="Add Event">
         <AddEventModal
@@ -366,22 +377,26 @@ export default function DailyView({
   }, [currentDate]);
 
   return (
-    <div className="">
-      <div className="flex justify-between gap-3 flex-wrap mb-5">
-        <h1 className="text-3xl font-semibold mb-4">
+    <div className="bg-gray-50/30 rounded-xl p-6">
+      <div className="flex justify-between gap-3 flex-wrap mb-6">
+        <h1 className="text-3xl font-bold text-gray-900">
           {getFormattedDayTitle()}
         </h1>
 
-        <div className="flex ml-auto  gap-3">
+        <div className="flex ml-auto gap-2">
           {prevButton ? (
             <div onClick={handlePrevDay}>{prevButton}</div>
           ) : (
             <Button
               variant={"outline"}
-              className={cn(classNames?.prev, 'text-slate-900')}
+              style={{ padding: '0.5rem 1rem' }}
+              className={cn(
+                classNames?.prev,
+                'text-gray-700 border-gray-200 hover:bg-gray-50 hover:border-gray-300 transition-all duration-200 shadow-sm'
+              )}
               onClick={handlePrevDay}
             >
-              <ArrowLeft />
+              <ArrowLeft className="w-4 h-4 mr-1" />
               Prev
             </Button>
           )}
@@ -390,11 +405,15 @@ export default function DailyView({
           ) : (
             <Button
               variant={"outline"}
-              className={cn(classNames?.next, 'text-slate-900')}
+              style={{ padding: '0.5rem 1rem' }}
+              className={cn(
+                classNames?.next,
+                'text-gray-700 border-gray-200 hover:bg-gray-50 hover:border-gray-300 transition-all duration-200 shadow-sm'
+              )}
               onClick={handleNextDay}
             >
               Next
-              <ArrowRight />
+              <ArrowRight className="w-4 h-4 ml-1" />
             </Button>
           )}
         </div>
@@ -403,101 +422,101 @@ export default function DailyView({
         <div key={currentDate.toISOString()} className="flex flex-col gap-4">
           {/* All-day strip removed per UX request: do not show all-day events above the hourly timetable. */}
 
-          <div className="relative rounded-md bg-default-50 hover:bg-default-100 transition duration-400">
-              <div
-                className="relative rounded-xl flex ease-in-out"
-                ref={hoursColumnRef}
-                onMouseMove={handleMouseMove}
-                onMouseLeave={() => setDetailedHour(null)}
-              >
-              <div className="flex  flex-col">
+          <div className="relative rounded-xl bg-white border border-gray-200 shadow-sm overflow-hidden">
+            <div
+              className="relative rounded-xl flex ease-in-out"
+              ref={hoursColumnRef}
+              onMouseMove={handleMouseMove}
+              onMouseLeave={() => setDetailedHour(null)}
+            >
+              <div className="flex flex-col bg-gray-50/50 border-r border-gray-200">
                 {hours.map((hour, index) => (
                   <div
                     key={`hour-${index}`}
-                    className="cursor-pointer   transition duration-300  p-4 h-[64px] text-left text-sm text-muted-foreground border-default-200"
+                    className="cursor-pointer transition duration-300 px-4 py-2 h-[64px] flex items-center text-left text-sm text-gray-600 font-medium"
                   >
                     {hour}
                   </div>
                 ))}
               </div>
-              <div className="flex relative flex-grow flex-col ">
+              <div className="flex relative flex-grow flex-col bg-white">
                 {Array.from({ length: 24 }).map((_, index) => (
                   <div
                     onClick={() => {
                       handleAddEventDay(detailedHour as string);
                     }}
                     key={`hour-${index}`}
-                    className="cursor-pointer w-full relative border-b  hover:bg-default-200/50  transition duration-300  p-4 h-[64px] text-left text-sm text-muted-foreground border-default-200"
+                    className="cursor-pointer w-full relative border-b border-gray-100 hover:bg-purple-50/30 transition duration-300 p-4 h-[64px] text-left text-sm text-gray-500"
                   >
-                    <div className="absolute bg-gray-200 flex items-center justify-center text-xs opacity-0 transition left-0 top-0 duration-250 hover:opacity-100 w-full h-full">
-                      Add Event
+                    <div className="absolute bg-purple-500/10 flex items-center justify-center text-sm font-medium text-purple-700 opacity-0 transition left-0 top-0 duration-250 hover:opacity-100 w-full h-full">
+                      + Add Event
                     </div>
                   </div>
                 ))}
                 {dayEvents && dayEvents?.length
-                    ? dayEvents?.map((event, eventIndex) => {
-                        // Find which time group this event belongs to
-                        let eventsInSamePeriod = 1;
-                        let periodIndex = 0;
-                        
-                        for (let i = 0; i < timeGroups.length; i++) {
-                          const groupIndex = timeGroups[i].findIndex(e => e.id === event.id);
-                          if (groupIndex !== -1) {
-                            eventsInSamePeriod = timeGroups[i].length;
-                            periodIndex = groupIndex;
-                            break;
-                          }
+                  ? dayEvents?.map((event, eventIndex) => {
+                      // Find which time group this event belongs to
+                      let eventsInSamePeriod = 1;
+                      let periodIndex = 0;
+                      
+                      for (let i = 0; i < timeGroups.length; i++) {
+                        const groupIndex = timeGroups[i].findIndex(e => e.id === event.id);
+                        if (groupIndex !== -1) {
+                          eventsInSamePeriod = timeGroups[i].length;
+                          periodIndex = groupIndex;
+                          break;
                         }
-                        
-                        // Use a local Mina-style layout helper to compute top/height/column packing
-                        const {
-                          height,
-                          left,
-                          maxWidth,
-                          minWidth,
-                          top,
-                          zIndex,
-                        } = computeMinaStyle(event, dayEvents);
-                        return (
-                          <div
-                            key={event.id}
-                            style={{
-                              display: 'block',
-                              minHeight: height,
-                              height: height,
-                              top: top,
-                              left: left,
-                              maxWidth: maxWidth,
-                              minWidth: minWidth,
-                              padding: "0 2px",
-                              boxSizing: "border-box",
-                              overflow: 'visible',
+                      }
+                      
+                      // Use a local Mina-style layout helper to compute top/height/column packing
+                      const {
+                        height,
+                        left,
+                        maxWidth,
+                        minWidth,
+                        top,
+                        zIndex,
+                      } = computeMinaStyle(event, dayEvents);
+                      return (
+                        <div
+                          key={event.id}
+                          style={{
+                            display: 'block',
+                            minHeight: height,
+                            height: height,
+                            top: top,
+                            left: left,
+                            maxWidth: maxWidth,
+                            minWidth: minWidth,
+                            padding: "0 2px",
+                            boxSizing: "border-box",
+                            overflow: 'visible',
+                          }}
+                          className="absolute transition-all duration-300 z-50 pointer-events-auto"
+                        >
+                          <EventStyled
+                            event={{
+                              ...event,
+                              CustomEventComponent,
+                              minmized: true,
                             }}
-                            className="absolute transition-all duration-300 z-50 pointer-events-auto"
-                          >
-                            <EventStyled
-                              event={{
-                                ...event,
-                                CustomEventComponent,
-                                minmized: true,
-                              }}
-                              CustomEventModal={CustomEventModal}
-                            />
-                          </div>
-                        );
-                      })
-                    : ""}
+                            CustomEventModal={CustomEventModal}
+                          />
+                        </div>
+                      );
+                    })
+                  : ""}
               </div>
             </div>
 
             {detailedHour && (
               <div
-                className="absolute left-[50px] w-[calc(100%-53px)] h-[2px] bg-primary/40 rounded-full pointer-events-none"
+                className="absolute left-[80px] w-[calc(100%-80px)] h-[2px] bg-purple-500/50 rounded-full pointer-events-none z-40"
                 style={{ top: `${timelinePosition}px` }}
               >
                 <Badge
                   variant="outline"
-                  className="absolute -translate-y-1/2 bg-white z-50 left-[-20px] text-xs"
+                  className="absolute -translate-y-1/2 bg-white border-purple-300 text-purple-700 font-medium z-50 left-[-65px] text-xs shadow-sm"
                 >
                   {detailedHour}
                 </Badge>

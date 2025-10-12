@@ -1,4 +1,5 @@
 import React from 'react';
+import Head from 'next/head';
 export default function Profile() {
   const [profile, setProfile] = React.useState(null);
   const [editing, setEditing] = React.useState(false);
@@ -22,6 +23,9 @@ export default function Profile() {
 
   return (
     <div style={{ padding: 36 }}>
+      <Head>
+        <title>Profile — University Planner</title>
+      </Head>
       <div className="card" style={{ maxWidth: 720, margin: '48px auto' }}>
         <h2 style={{ marginTop: 0 }}>Profile</h2>
         {!profile ? (

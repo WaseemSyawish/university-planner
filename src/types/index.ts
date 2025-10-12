@@ -13,6 +13,7 @@ export interface Event {
   title: string;
   description?: string;
   color?: string;
+  type?: string;
   startDate: Date;
   endDate: Date;
   variant?: Variant;
@@ -114,6 +115,7 @@ export const eventSchema = z.object({
   endDate: z.date(),
   variant: z.enum(["primary", "danger", "success", "warning", "default"]),
   color: z.string().nonempty("Color selection is required"),
+  type: z.string().optional(),
 });
 
 export type EventFormData = z.infer<typeof eventSchema>;

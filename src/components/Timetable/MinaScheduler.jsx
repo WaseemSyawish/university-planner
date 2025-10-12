@@ -85,9 +85,10 @@ export default function MinaScheduler({ weekDates = [], timeSlots = [], classes 
                   const rect = e.currentTarget.getBoundingClientRect();
                   const y = e.clientY - rect.top - 6; // account for padding
                   const ratio = Math.max(0, Math.min(1, y / containerHeight));
-                  const minutes = Math.round((baseMinutes + ratio * (timeSlots.length * 60)) / 30) * 30; // snap to 30m
-                  const hh = String(Math.floor(minutes / 60)).padStart(2,'0');
-                  const mm = String(minutes % 60).padStart(2,'0');
+                  // compute precise minutes (no snapping to 30m)
+                  const totalMinutes = Math.round(baseMinutes + ratio * (timeSlots.length * 60));
+                  const hh = String(Math.floor(totalMinutes / 60)).padStart(2,'0');
+                  const mm = String(totalMinutes % 60).padStart(2,'0');
                   const clicked = `${hh}:${mm}`;
                   onSlotClick(dateStr, clicked);
                 }}>
