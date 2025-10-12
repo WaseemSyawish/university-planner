@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Calendar, BookOpen, TrendingUp, Clock, CheckCircle, AlertCircle, GraduationCap, Users } from 'lucide-react';
-import CalendarHeader from '../src/components/CalendarHeader';
+import CalendarHeader from '../src/components/CalendarHeader.jsx';
 
 // Small presentational StatCard with light/dark mode support
 function StatCard({ icon, label, value, loading, accent = 'purple', smallIconClass = '' }) {
@@ -247,7 +247,19 @@ export default function UniversityOverview() {
         try {
           const evs = await safeFetchJson('/api/events');
                 if (evs && Array.isArray(evs.events)) {
-                  const upcoming = evs.events.filter(e => e.type === 'lecture' || e.type === 'class')
+                  // helper: convert to local date-only (midnight) for fair comparisons
+                  const toLocalMidnight = (d) => {
+                    try {
+                      const dt = new Date(d);
+                      if (isNaN(dt.getTime())) return null;
+                      return new Date(dt.getFullYear(), dt.getMonth(), dt.getDate());
+                    } catch (e) { return null; }
+                  };
+
+                  const todayMid = toLocalMidnight(new Date());
+
+                  const upcoming = evs.events
+                    .filter(e => e && (e.type === 'lecture' || e.type === 'class') && e.date)
                     .map(e => ({
                       id: e.id,
                       date: e.date,
@@ -257,9 +269,12 @@ export default function UniversityOverview() {
                       location: e.location || '',
                       instructor: e.instructor || ''
                     }))
-                    .filter(e => e.date)
-                    .sort((a,b) => new Date(a.date) - new Date(b.date))
-                    .slice(0,6);
+                    .map(e => ({ ...e, _dateObj: toLocalMidnight(e.date) }))
+                    .filter(e => e._dateObj && e._dateObj >= todayMid) // only today or future
+                    .sort((a,b) => a._dateObj - b._dateObj)
+                    .slice(0,6)
+                    .map(({_dateObj, ...rest}) => rest);
+
                   setNextClasses(upcoming);
                 }
               } catch (e) { setNextClasses([]); }
