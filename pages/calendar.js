@@ -826,9 +826,9 @@ export default function CalendarPage() {
                               {events
                                   .filter(e => {
                                     try {
-                                      // include events on or after the selected date
+                                      // include only events after the selected date (exclude same-day items)
                                       const evDate = toYMD(e.date);
-                                      return evDate >= toYMD(selectedDate);
+                                      return evDate > toYMD(selectedDate);
                                     } catch (err) { return false; }
                                   })
                                   // sort by date then startTime (empty times sort last)
