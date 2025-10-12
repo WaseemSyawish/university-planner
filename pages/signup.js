@@ -14,14 +14,18 @@ export default function SignUp() {
         /* Page-scoped override: ensure form inputs are readable in dark mode */
         .signup-root input, .signup-root textarea, .signup-root select {
           background: var(--card-bg) !important;
-          color: var(--brand-900) !important;
-          caret-color: var(--brand-900) !important;
+          color: #0b1220 !important;
+          caret-color: #0b1220 !important;
+          -webkit-text-fill-color: #0b1220 !important; /* Chrome */
         }
-        .signup-root input::placeholder, .signup-root textarea::placeholder {
-          color: rgba(51,65,85,0.45) !important;
-        }
-        html.dark .signup-root input::placeholder, html.dark .signup-root textarea::placeholder {
-          color: rgba(230,238,251,0.7) !important;
+        .signup-root input::placeholder, .signup-root textarea::placeholder { color: rgba(51,65,85,0.45) !important; }
+        html.dark .signup-root input::placeholder, html.dark .signup-root textarea::placeholder { color: rgba(230,238,251,0.7) !important; }
+
+        /* Dark-mode explicit overrides */
+        html.dark .signup-root input, html.dark .signup-root textarea, html.dark .signup-root select {
+          color: #e6eefb !important;
+          caret-color: #e6eefb !important;
+          -webkit-text-fill-color: #e6eefb !important;
         }
       `}</style>
       <Head>
@@ -109,6 +113,7 @@ export default function SignUp() {
                   required
                   autoComplete="name"
                   className="block w-full pl-10 pr-3 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent transition-all bg-white dark:bg-slate-800 text-slate-900 dark:text-slate-100 placeholder-gray-400 dark:placeholder-slate-400"
+                  style={{ background: 'var(--card-bg)', color: 'var(--brand-900)', caretColor: 'var(--brand-900)' }}
                   placeholder="John Doe"
                 />
               </div>
@@ -130,6 +135,7 @@ export default function SignUp() {
                   required
                   autoComplete="email"
                   className="block w-full pl-10 pr-3 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent transition-all bg-white dark:bg-slate-800 text-slate-900 dark:text-slate-100 placeholder-gray-400 dark:placeholder-slate-400"
+                  style={{ background: 'var(--card-bg)', color: 'var(--brand-900)', caretColor: 'var(--brand-900)' }}
                   placeholder="you@university.edu"
                 />
               </div>
@@ -151,6 +157,7 @@ export default function SignUp() {
                   required
                   autoComplete="new-password"
                   className="block w-full pl-10 pr-3 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent transition-all bg-white dark:bg-slate-800 text-slate-900 dark:text-slate-100 placeholder-gray-400 dark:placeholder-slate-400"
+                  style={{ background: 'var(--card-bg)', color: 'var(--brand-900)', caretColor: 'var(--brand-900)' }}
                   placeholder="••••••••"
                 />
               </div>

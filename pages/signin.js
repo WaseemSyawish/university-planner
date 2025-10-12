@@ -88,14 +88,18 @@ export default function SignIn() {
         /* Page-scoped override: ensure form inputs are readable in dark mode */
         .signin-root input, .signin-root textarea, .signin-root select {
           background: var(--card-bg) !important;
-          color: var(--brand-900) !important;
-          caret-color: var(--brand-900) !important;
+          color: #0b1220 !important;
+          caret-color: #0b1220 !important;
+          -webkit-text-fill-color: #0b1220 !important; /* Chrome */
         }
-        .signin-root input::placeholder, .signin-root textarea::placeholder {
-          color: rgba(51,65,85,0.45) !important;
-        }
-        html.dark .signin-root input::placeholder, html.dark .signin-root textarea::placeholder {
-          color: rgba(230,238,251,0.7) !important;
+        .signin-root input::placeholder, .signin-root textarea::placeholder { color: rgba(51,65,85,0.45) !important; }
+        html.dark .signin-root input::placeholder, html.dark .signin-root textarea::placeholder { color: rgba(230,238,251,0.7) !important; }
+
+        /* Dark-mode explicit overrides */
+        html.dark .signin-root input, html.dark .signin-root textarea, html.dark .signin-root select {
+          color: #e6eefb !important;
+          caret-color: #e6eefb !important;
+          -webkit-text-fill-color: #e6eefb !important;
         }
       `}</style>
       <Head>
@@ -138,6 +142,7 @@ export default function SignIn() {
                   required
                   autoComplete="email"
                   className="block w-full pl-10 pr-3 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent transition-all bg-white dark:bg-slate-800 text-slate-900 dark:text-slate-100 placeholder-gray-400 dark:placeholder-slate-400"
+                  style={{ background: 'var(--card-bg)', color: 'var(--brand-900)', caretColor: 'var(--brand-900)' }}
                   placeholder="you@university.edu"
                 />
               </div>
@@ -159,6 +164,7 @@ export default function SignIn() {
                   required
                   autoComplete="current-password"
                   className="block w-full pl-10 pr-3 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent transition-all bg-white dark:bg-slate-800 text-slate-900 dark:text-slate-100 placeholder-gray-400 dark:placeholder-slate-400"
+                  style={{ background: 'var(--card-bg)', color: 'var(--brand-900)', caretColor: 'var(--brand-900)' }}
                   placeholder="••••••••"
                 />
               </div>
