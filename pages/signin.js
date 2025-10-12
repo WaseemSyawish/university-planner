@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import Head from 'next/head';
 import Link from 'next/link';
 import { useRouter } from 'next/router';
@@ -10,6 +10,19 @@ export default function SignIn() {
   const returnTo = Array.isArray(router.query.returnTo) ? router.query.returnTo[0] : (router.query.returnTo || '/overview');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+  const [justRegistered, setJustRegistered] = useState(false);
+
+  // When redirected from the signup page, show a friendly success banner.
+  useEffect(() => {
+    if (!router || !router.query) return;
+    if (router.query.registered === '1' || router.query.registered === 'true') {
+      setJustRegistered(true);
+      // Clear the param from the URL so refresh doesn't keep showing it.
+      const url = new URL(window.location.href);
+      url.searchParams.delete('registered');
+      window.history.replaceState({}, '', url.pathname + url.search);
+    }
+  }, [router]);
 
   async function handleSubmit(e) {
     e.preventDefault();
@@ -71,6 +84,20 @@ export default function SignIn() {
 
   return (
   <div className="min-h-screen signin-root bg-gradient-to-br from-purple-50 via-white to-indigo-50 flex items-center justify-center p-4">
+      <style jsx global>{`
+        /* Page-scoped override: ensure form inputs are readable in dark mode */
+        .signin-root input, .signin-root textarea, .signin-root select {
+          background: var(--card-bg) !important;
+          color: var(--brand-900) !important;
+          caret-color: var(--brand-900) !important;
+        }
+        .signin-root input::placeholder, .signin-root textarea::placeholder {
+          color: rgba(51,65,85,0.45) !important;
+        }
+        html.dark .signin-root input::placeholder, html.dark .signin-root textarea::placeholder {
+          color: rgba(230,238,251,0.7) !important;
+        }
+      `}</style>
       <Head>
         <title>Sign in — University Planner</title>
       </Head>
@@ -86,6 +113,12 @@ export default function SignIn() {
 
         {/* Sign In Card */}
         <div className="bg-white rounded-2xl shadow-xl border border-gray-100 p-8">
+          {/* Show a success banner if redirected from signup */}
+          {justRegistered && (
+            <div className="bg-green-50 border border-green-200 rounded-lg p-4 mb-4 text-sm text-green-800">
+              Account created successfully — please sign in.
+            </div>
+          )}
           <form onSubmit={handleSubmit} className="space-y-6">
             <input type="hidden" name="returnTo" value={returnTo} />
             
@@ -104,7 +137,7 @@ export default function SignIn() {
                   type="email"
                   required
                   autoComplete="email"
-                  className="block w-full pl-10 pr-3 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent transition-all"
+                  className="block w-full pl-10 pr-3 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent transition-all bg-white dark:bg-slate-800 text-slate-900 dark:text-slate-100 placeholder-gray-400 dark:placeholder-slate-400"
                   placeholder="you@university.edu"
                 />
               </div>
@@ -125,7 +158,7 @@ export default function SignIn() {
                   type="password"
                   required
                   autoComplete="current-password"
-                  className="block w-full pl-10 pr-3 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent transition-all"
+                  className="block w-full pl-10 pr-3 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent transition-all bg-white dark:bg-slate-800 text-slate-900 dark:text-slate-100 placeholder-gray-400 dark:placeholder-slate-400"
                   placeholder="••••••••"
                 />
               </div>

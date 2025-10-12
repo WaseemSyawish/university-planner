@@ -10,6 +10,20 @@ export default function SignUp() {
 
   return (
   <div className="min-h-screen signup-root bg-gradient-to-br from-indigo-50 via-white to-purple-50 flex items-center justify-center p-4">
+      <style jsx global>{`
+        /* Page-scoped override: ensure form inputs are readable in dark mode */
+        .signup-root input, .signup-root textarea, .signup-root select {
+          background: var(--card-bg) !important;
+          color: var(--brand-900) !important;
+          caret-color: var(--brand-900) !important;
+        }
+        .signup-root input::placeholder, .signup-root textarea::placeholder {
+          color: rgba(51,65,85,0.45) !important;
+        }
+        html.dark .signup-root input::placeholder, html.dark .signup-root textarea::placeholder {
+          color: rgba(230,238,251,0.7) !important;
+        }
+      `}</style>
       <Head>
         <title>Sign up — University Planner</title>
       </Head>
@@ -52,39 +66,20 @@ export default function SignUp() {
                 headers: { 'Content-Type': 'application/json' }, 
                 body: JSON.stringify({ name, email, password }) 
               });
-              
+
               if (res.status === 201) {
-                const params = new URLSearchParams(window.location.search);
-                const returnTo = params.get('returnTo') || '/overview';
-                
+                // Simple, clear UX: redirect to sign-in page with a flag so
+                // the sign-in page can show a success banner. This avoids
+                // confusing multi-step auto sign-in flows and makes it
+                // explicit to the user that the account was created.
                 try {
-                  const result = await signIn('credentials', { redirect: false, email, password });
-                  console.log('[signup] next-auth signIn result', result);
-
-                  try {
-                    const check = await fetch('/api/auth/me');
-                    if (check.ok) {
-                      const json = await check.json().catch(()=>null);
-                      if (json && json.authenticated) {
-                        const dest = result?.url || returnTo || '/overview';
-                        window.location.href = dest;
-                        return;
-                      }
-                    }
-                  } catch (e) {
-                    console.warn('[signup] /api/auth/me check failed', e);
-                  }
-
-                  try {
-                    await signIn('credentials', { redirect: true, email, password, callbackUrl: returnTo });
-                    return;
-                  } catch (e) {
-                    console.error('[signup] final redirect signIn failed', e);
-                    setError('Account created but sign-in failed. You can sign in manually.');
-                  }
+                  window.location.href = '/signin?registered=1';
+                  return;
                 } catch (e) {
-                  console.error('[signup] next-auth signIn failed', e);
-                  setError('Account created but sign-in failed. You can sign in manually.');
+                  // Fallback: show message and instruct user to sign in
+                  setError('Account created. Please sign in.');
+                  setLoading(false);
+                  return;
                 }
               } else {
                 const payload = await res.json().catch(()=>({}));
@@ -113,7 +108,7 @@ export default function SignUp() {
                   type="text"
                   required
                   autoComplete="name"
-                  className="block w-full pl-10 pr-3 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent transition-all"
+                  className="block w-full pl-10 pr-3 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent transition-all bg-white dark:bg-slate-800 text-slate-900 dark:text-slate-100 placeholder-gray-400 dark:placeholder-slate-400"
                   placeholder="John Doe"
                 />
               </div>
@@ -134,7 +129,7 @@ export default function SignUp() {
                   type="email"
                   required
                   autoComplete="email"
-                  className="block w-full pl-10 pr-3 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent transition-all"
+                  className="block w-full pl-10 pr-3 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent transition-all bg-white dark:bg-slate-800 text-slate-900 dark:text-slate-100 placeholder-gray-400 dark:placeholder-slate-400"
                   placeholder="you@university.edu"
                 />
               </div>
@@ -155,7 +150,7 @@ export default function SignUp() {
                   type="password"
                   required
                   autoComplete="new-password"
-                  className="block w-full pl-10 pr-3 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent transition-all"
+                  className="block w-full pl-10 pr-3 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent transition-all bg-white dark:bg-slate-800 text-slate-900 dark:text-slate-100 placeholder-gray-400 dark:placeholder-slate-400"
                   placeholder="••••••••"
                 />
               </div>
