@@ -25,7 +25,7 @@ try {
       type: e.type || 'event',
       location: e.location || '',
       description: e.description || '',
-      color: e.type === 'class' ? 'bg-primary' : (e.type === 'deadline' ? 'bg-error' : 'bg-secondary')
+  color: (e.type === 'class' || e.type === 'timetable') ? 'bg-primary' : (e.type === 'deadline' ? 'bg-error' : 'bg-secondary')
     }));
   }
 } catch (err) {
@@ -76,6 +76,22 @@ export default function CalendarPage() {
   }
 
   useEffect(() => {
+    // If a ?date=YYYY-MM-DD param is present, navigate the calendar to that date on mount
+    try {
+      if (typeof window !== 'undefined') {
+        const params = new URLSearchParams(window.location.search);
+        const qd = params.get('date');
+        if (qd && /^\d{4}-\d{2}-\d{2}$/.test(qd)) {
+          const [y, m, d] = qd.split('-').map(n => Number(n));
+          if (Number.isFinite(y) && Number.isFinite(m) && Number.isFinite(d)) {
+            const parsed = new Date(y, m - 1, d);
+            setCurrentDate(parsed);
+            setSelectedDate(qd);
+          }
+        }
+      }
+    } catch (e) { /* ignore */ }
+
     let cancelled = false;
     const y = currentDate.getFullYear();
     const range = `${y}-${y+1}`;
@@ -99,6 +115,36 @@ export default function CalendarPage() {
 
     return () => { cancelled = true; window.removeEventListener('keydown', onKey); };
   }, [currentDate]);
+
+  // initialize newEvent color from last user selection, if available
+  useEffect(() => {
+    try {
+      const last = typeof window !== 'undefined' ? localStorage.getItem('up:lastEventColor') : null;
+      if (last) setNewEvent(prev => ({ ...prev, color: last }));
+    } catch (e) {}
+  }, []);
+
+  // keep newEvent.color consistent for 'class' type: use legend color bg-primary unless user overrides
+  useEffect(() => {
+    try {
+      if (newEvent.type === 'class' || newEvent.type === 'timetable') {
+        setNewEvent(prev => ({ ...prev, color: prev.color && prev.color.startsWith('bg-') ? prev.color : 'bg-primary' }));
+      }
+    } catch (e) {}
+  }, [newEvent.type]);
+
+  // Open the create-event modal prefilled for today
+  const handleTodayCreate = () => {
+    const today = new Date();
+    const ymd = toYMD(today);
+    // navigate calendar to today
+    setCurrentDate(today);
+    // clear any selected event and prefill the newEvent for today
+    setSelectedEvent(null);
+    setNewEvent(prev => ({ ...prev, title: '', date: ymd, startTime: '', endTime: '', type: 'event', location: '', description: '' }));
+    setSelectedDate(ymd);
+    setShowEventModal(true);
+  };
 
   // Load events from server (Prisma-backed) on mount. Keep any temporary/timetable placeholders.
   useEffect(() => {
@@ -168,18 +214,18 @@ export default function CalendarPage() {
           if (c.date && !c.repeat && c.repeatOption !== 'weekly' && c.dayOfWeek == null) {
             const d = (typeof c.date === 'string' && c.date.length >= 10) ? c.date.slice(0,10) : toYMD(c.date);
             if (visibleDates.has(d)) {
-              occurrences.push({
-                id: `tt-${String(c.id)}`,
-                title: c.subject || c.title || 'Class',
-                date: d,
-                startTime: start,
-                endTime: end,
-                type: 'class',
-                location: c.location || '',
-                description: c.instructor ? `Instructor: ${c.instructor}` : (c.description || ''),
-                color: c.color || 'bg-primary'
-              });
-            }
+                occurrences.push({
+                  id: `tt-${String(c.id)}`,
+                  title: c.subject || c.title || 'Class',
+                  date: d,
+                  startTime: start,
+                  endTime: end,
+                  type: 'timetable',
+                  location: c.location || '',
+                  description: c.instructor ? `Instructor: ${c.instructor}` : (c.description || ''),
+                  color: c.color || 'bg-primary'
+                });
+              }
             continue;
           }
 
@@ -187,7 +233,7 @@ export default function CalendarPage() {
           const dow = (typeof c.dayOfWeek === 'number') ? c.dayOfWeek : (c.repeatOption === 'weekly' && typeof c.dayOfWeek === 'number' ? c.dayOfWeek : null);
           if (dow != null) {
             for (const dObj of gridDays) {
-              if (dObj.date.getDay() === dow) {
+                if (dObj.date.getDay() === dow) {
                 const d = toYMD(dObj.date);
                 occurrences.push({
                   id: `tt-${String(c.id)}-${d}`,
@@ -195,7 +241,7 @@ export default function CalendarPage() {
                   date: d,
                   startTime: start,
                   endTime: end,
-                  type: 'class',
+                  type: 'timetable',
                   location: c.location || '',
                   description: c.instructor ? `Instructor: ${c.instructor}` : (c.description || ''),
                   color: c.color || 'bg-primary'
@@ -215,7 +261,7 @@ export default function CalendarPage() {
                 date: d,
                 startTime: start,
                 endTime: end,
-                type: 'class',
+                type: 'timetable',
                 location: c.location || '',
                 description: c.instructor ? `Instructor: ${c.instructor}` : (c.description || ''),
                 color: c.color || 'bg-primary'
@@ -266,19 +312,61 @@ export default function CalendarPage() {
   // Always render 6 rows (42 cells) so the calendar grid has a consistent height
   // across all months. This keeps layout stable and prevents jumps when months
   // require 5 vs 6 weeks.
-  const targetCells = 42;
+  // Previously the calendar always forced 6 rows (42 cells). That produced
+  // unnecessary grey rows for many months. Instead, append only enough
+  // trailing days from the next month to complete the final week.
+  // Determine how many trailing days are needed so the last calendar row
+  // ends on Saturday (weekday 6). If the month's last day is Saturday,
+  // no trailing days are added.
+  const lastWeekday = lastDay.getDay(); // 0 (Sun) - 6 (Sat)
+  const trailingDays = lastWeekday === 6 ? 0 : (6 - lastWeekday);
 
-    // trailing days from next month to fill the grid to targetCells
-    while (days.length < targetCells) {
-      const last = days[days.length - 1].date;
-      const next = new Date(last.getFullYear(), last.getMonth(), last.getDate() + 1);
-      days.push({ date: next, isCurrentMonth: false });
-    }
+  for (let i = 1; i <= trailingDays; i++) {
+    const next = new Date(year, month + 1, i);
+    days.push({ date: next, isCurrentMonth: false });
+  }
 
     return days;
   };
 
   const days = useMemo(() => getDaysInMonth(currentDate), [currentDate]);
+
+  // Dynamically compute and set the --calendar-row-height CSS variable on the
+  // grid element so the 6-row visual height fits the viewport precisely.
+  useEffect(() => {
+    if (!gridRef || !gridRef.current) return;
+
+    function computeRowHeight() {
+      try {
+        const gridEl = gridRef.current;
+        const rect = gridEl.getBoundingClientRect();
+        const top = rect.top; // distance from viewport top to grid
+  const available = window.innerHeight - top - 48; // leave larger bottom gap for visible padding
+
+        // gaps between rows: 5 gaps (6 rows) * gap px
+        const gapPx = (window.matchMedia('(max-width:900px)').matches ? 4 : 6);
+        const gapTotal = gapPx * 5;
+
+        // compute ideal per-row height to exactly fill available space
+        const rawRow = Math.floor((available - gapTotal) / 6);
+
+        // clamp to sensible bounds so rows don't become tiny or huge
+        const row = Math.max(48, Math.min(84, rawRow));
+
+        gridEl.style.setProperty('--calendar-row-height', `${row}px`);
+        // ensure the grid uses the computed height visually (CSS calc uses var)
+        // (no need to set height here because CSS already computes it using the var)
+      } catch (e) {
+        // ignore measurement errors
+      }
+    }
+
+    computeRowHeight();
+    window.addEventListener('resize', computeRowHeight);
+    const mo = new MutationObserver(computeRowHeight);
+    mo.observe(document.body, { childList: true, subtree: true });
+    return () => { window.removeEventListener('resize', computeRowHeight); mo.disconnect(); };
+  }, [currentDate, gridRef]);
 
   const getEventsForDate = (date) => {
     const ymd = toYMD(date);
@@ -324,6 +412,7 @@ export default function CalendarPage() {
           title: newEvent.title,
           date: newEvent.date,
           time: newEvent.startTime || null,
+          color: newEvent.color || null,
           type: newEvent.type || 'event',
           location: newEvent.location || null,
           description: newEvent.description || null
@@ -340,7 +429,7 @@ export default function CalendarPage() {
             if (r.ok) {
               const pl = await r.json();
               const list = Array.isArray(pl?.events) ? pl.events : (Array.isArray(pl) ? pl : []);
-              const normalized = list.map(e => ({ id: String(e.id), title: e.title || body.title, date: e.date || body.date, startTime: e.time || '', endTime: e.endTime || '', type: e.type || body.type || 'event', location: e.location || '', description: e.description || '' }));
+              const normalized = list.map(e => ({ id: String(e.id), title: e.title || body.title, date: e.date || body.date, startTime: e.time || '', endTime: e.endTime || '', type: e.type || body.type || 'event', location: e.location || '', description: e.description || '', color: e.color || ((e.type === 'class' || e.type === 'timetable') ? 'bg-primary' : (e.type === 'deadline' ? 'bg-error' : 'bg-secondary')) }));
               // preserve temp items
               const preserved = (events || []).filter(ev => String(ev.id).startsWith('tmp-'));
               setEvents([...normalized, ...preserved]);
@@ -356,7 +445,8 @@ export default function CalendarPage() {
           endTime: created.endTime || '',
           type: created.type || body.type || 'event',
           location: created.location || '',
-          description: created.description || ''
+          description: created.description || '',
+          color: created.color || body.color || 'bg-secondary'
         };
         setEvents(prev => prev.map(p => p.id === tempId ? mapped : p));
       } catch (err) {
@@ -466,9 +556,10 @@ export default function CalendarPage() {
               <p className="text-xs text-slate-700 dark:text-slate-300">Manage your schedule</p>
             </div>
           </div>
-          <Button onClick={() => { setSelectedDate(toYMD(new Date())); setShowEventModal(true); setSelectedEvent(null); resetForm(); }} className="bg-gradient-to-r from-purple-600 to-purple-700 hover:from-purple-700 hover:to-purple-800 text-white shadow-lg shadow-purple-500/25 transition-all duration-200 hover:shadow-xl hover:shadow-purple-500/35 px-5 h-10 rounded-xl font-medium">
-            <Plus className="w-4 h-4 mr-2" />Create Event
-          </Button>
+          <button onClick={handleTodayCreate} className="px-5 py-2 bg-gradient-to-r from-purple-600 to-purple-700 hover:from-purple-500 hover:to-purple-600 text-white rounded-lg text-sm font-medium transition-all duration-200 hover:shadow-lg hover:shadow-purple-500/30 flex items-center gap-2">
+            <Plus className="w-4 h-4" />
+            <span className="ml-2">Create</span>
+          </button>
         </div>
       </header>
 
@@ -478,19 +569,20 @@ export default function CalendarPage() {
             <div className="cozy backdrop-blur-sm rounded-2xl shadow-xl border border-slate-200/60 overflow-hidden h-full flex flex-col">
               <div className="px-4 py-3 border-b border-slate-200/60 flex items-center justify-between bg-gradient-to-r from-white via-blue-50/20 to-white">
                 <div className="flex items-center gap-3">
-                  <Button onClick={() => navigateMonth(-1)} variant="ghost" size="icon" className="hover:bg-purple-100 hover:text-purple-700 transition-colors rounded-lg h-9 w-9">
-                    <ChevronLeft className="w-5 h-5" />
+                  <Button onClick={() => navigateMonth(-1)} variant="ghost" size="icon" className="hover:bg-purple-100 hover:text-purple-700 transition-colors rounded-lg h-12 w-12 text-slate-700">
+                    <ChevronLeft className="w-6 h-6" strokeWidth={2} />
                   </Button>
                   <div className="text-2xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-purple-700 via-purple-600 to-purple-700">
                     {monthNames[currentDate.getMonth()]} {currentDate.getFullYear()}
                   </div>
-                  <Button onClick={() => navigateMonth(1)} variant="ghost" size="icon" className="hover:bg-purple-100 hover:text-purple-700 transition-colors rounded-lg h-9 w-9">
-                    <ChevronRight className="w-5 h-5" />
+                  <Button onClick={() => navigateMonth(1)} variant="ghost" size="icon" className="hover:bg-purple-100 hover:text-purple-700 transition-colors rounded-lg h-12 w-12 text-slate-700">
+                    <ChevronRight className="w-6 h-6" strokeWidth={2} />
                   </Button>
                 </div>
-                <Button variant="outline" onClick={() => setCurrentDate(new Date())} className="today-btn border-2 border-purple-200 hover:bg-purple-50 hover:border-purple-300 transition-all rounded-lg px-4 font-medium text-sm h-9">
-                  Today
-                </Button>
+                <button onClick={handleTodayCreate} className="px-5 py-2 bg-gradient-to-r from-purple-600 to-purple-700 hover:from-purple-500 hover:to-purple-600 text-white rounded-lg text-sm font-medium transition-all duration-200 hover:shadow-lg hover:shadow-purple-500/30 flex items-center gap-2">
+                  <Plus className="w-4 h-4" />
+                  <span className="ml-2">Create</span>
+                </button>
               </div>
 
               <div className="p-3 flex-1 min-h-0 flex flex-col">
@@ -537,21 +629,92 @@ export default function CalendarPage() {
                           </div>
                         </div>
 
-                        <div className="flex flex-wrap gap-2 mt-2">
-                          {allItems.slice(0,6).map((item) => (
-                            <button 
-                              key={item.id} 
-                              onClick={(e) => { e.stopPropagation(); !item.isHoliday && handleEventClick(e, item); }} 
-                              title={item.title} 
-                              className={`event-dot w-3 h-3 ${item.color} rounded-full border-2 border-white shadow-sm hover:scale-110 transition-transform duration-150`}
-                              aria-label={item.isHoliday ? item.title : `Open ${item.title}`}
-                            />
-                          ))}
-                          {allItems.length > 6 && (
-                            <div className="text-xs font-semibold text-primary bg-primary/10 px-1.5 py-0.5 rounded-full">
-                              +{allItems.length - 6}
-                            </div>
-                          )}
+                        <div className="events-area">
+                          <div className="flex flex-wrap gap-2">
+                            {allItems.slice(0,6).map((item) => {
+                              // compute dot color: support Tailwind bg-* classes, shorthand like 'indigo-500', and inline colors
+                              let dotClass = '';
+                              let dotStyle = {};
+                              const val = item && item.color;
+                              const tailwindToHex = {
+                                'indigo-500': '#6366F1',
+                                'blue-500': '#3B82F6',
+                                'green-500': '#10B981',
+                                'red-500': '#EF4444',
+                                'yellow-500': '#F59E0B',
+                                'gray-500': '#6B7280',
+                                'purple-500': '#8B5CF6',
+                                'pink-500': '#8B5CF6',
+                                'teal-500': '#14B8A6'
+                              };
+
+                              const pickColor = (v) => {
+                                if (!v) return;
+                                const s = String(v).trim();
+                                if (!s) return;
+                                if (s.startsWith('bg-')) { dotClass = s; return; }
+                                if (/^[a-z]+-\d{3,4}$/i.test(s)) { dotClass = 'bg-' + s; return; }
+                                if (s.startsWith('#') || s.startsWith('rgb')) { dotStyle.background = s; return; }
+                                if (/^[a-z]+$/i.test(s)) { dotStyle.background = s; return; }
+                                dotStyle.background = s;
+                              };
+
+                              try {
+                                pickColor(val);
+                              } catch (e) {}
+
+                              // If we only have a bgClass like 'bg-primary' or 'bg-indigo-500', try to derive a hex fallback
+                              if (!dotStyle.background && dotClass) {
+                                try {
+                                  const key = dotClass.replace(/^bg-/, '');
+                                  if (tailwindToHex[key]) dotStyle.background = tailwindToHex[key];
+                                } catch (e) {}
+                              }
+
+                              // Final fallback: deterministic palette by id/title
+                              if (!dotStyle.background && !dotClass) {
+                                const palette = Object.values(tailwindToHex);
+                                try {
+                                  const seed = String(item.id || item.title || Math.random());
+                                  let h = 0; for (let i = 0; i < seed.length; i++) h = (h << 5) - h + seed.charCodeAt(i);
+                                  const idx = Math.abs(h) % palette.length;
+                                  dotStyle.background = palette[idx];
+                                } catch (e) {
+                                  dotStyle.background = '#6366F1';
+                                }
+                              }
+
+                              // readable foreground for inline hex (not used for dots but keep for completeness)
+                              if (dotStyle.background && String(dotStyle.background).startsWith('#')) {
+                                try {
+                                  const hex = String(dotStyle.background).replace('#','');
+                                  const r = parseInt(hex.slice(0,2),16);
+                                  const g = parseInt(hex.slice(2,4),16);
+                                  const b = parseInt(hex.slice(4,6),16);
+                                  const lum = (0.2126 * r + 0.7152 * g + 0.0722 * b) / 255;
+                                  dotStyle.color = lum > 0.6 ? '#000' : '#fff';
+                                } catch (e) { dotStyle.color = '#fff'; }
+                              }
+
+                              const baseStyle = { width: 8, height: 8, padding: 0, display: 'inline-block', minWidth: 0, minHeight: 0, lineHeight: 0, boxSizing: 'content-box', borderWidth: '1px' };
+
+                              return (
+                                <button
+                                  key={item.id}
+                                  onClick={(e) => { e.stopPropagation(); !item.isHoliday && handleEventClick(e, item); }}
+                                  title={item.title}
+                                  className={`event-dot ${dotClass ? dotClass : ''} rounded-full border border-white shadow-sm hover:scale-105 transition-transform duration-150`}
+                                  style={{ ...baseStyle, ...(dotStyle || {}) }}
+                                  aria-label={item.isHoliday ? item.title : `Open ${item.title}`}
+                                />
+                              );
+                            })}
+                            {allItems.length > 6 && (
+                              <div className="text-xs font-semibold text-primary bg-primary/10 px-1.5 py-0.5 rounded-full">
+                                +{allItems.length - 6}
+                              </div>
+                            )}
+                          </div>
                         </div>
                       </div>
                     );
@@ -576,7 +739,7 @@ export default function CalendarPage() {
                     {color:'bg-warning',label:'Holiday'}
                   ].map(item => (
                     <div key={item.label} className="flex items-center gap-2 px-2 py-1 bg-slate-50 rounded-md border border-slate-100">
-                      <div className={`w-2.5 h-2.5 ${item.color} rounded-full border-2 border-white shadow-sm`} />
+                      <div className={`${item.color} rounded-full border border-white shadow-sm`} style={{ width: 8, height: 8, display: 'inline-block', minWidth: 0, minHeight: 0, lineHeight: 0, boxSizing: 'content-box', borderWidth: '1px' }} />
                       <div className="text-xs text-slate-700 dark:text-slate-300">{item.label}</div>
                     </div>
                   ))}
@@ -591,16 +754,6 @@ export default function CalendarPage() {
                   <div className="mt-3 text-sm text-slate-600 dark:text-slate-300">{(() => { const evs = getEventsForDate(selectedDate||''); return evs.length ? `${evs.length} event${evs.length>1?'s':''}` : 'No events'; })()}</div>
                 </div>
               </div>
-              <div className="flex items-end justify-between mb-2">
-                <Button 
-                  size="icon" 
-                  onClick={() => { setSelectedDate(selectedDate || toYMD(new Date())); setShowEventModal(true); setSelectedEvent(null); resetForm(); }} 
-                  className="bg-gradient-to-br from-purple-600 to-purple-700 hover:from-purple-700 hover:to-purple-800 text-white shadow-md shadow-purple-500/25 rounded-lg h-9 w-9"
-                  aria-label="Create event for selected day"
-                >
-                  <Plus className="w-4 h-4" />
-                </Button>
-              </div>
 
               {/* Legend is shown above (single instance) - removed duplicate block */}
 
@@ -613,9 +766,8 @@ export default function CalendarPage() {
                       <div className="space-y-3">
                         {hol && (
                           <div className="p-3 bg-gradient-to-br from-amber-50 to-yellow-50 border-2 border-amber-200 rounded-lg shadow-sm">
-                            <div className="flex items-center gap-2">
-                              <div className="w-3 h-3 bg-warning rounded-full border-2 border-white shadow-sm"></div>
-                              <div className="text-sm font-bold text-amber-900">{hol.localName || hol.name}</div>
+                            <div className="flex items-center gap-3">
+                              <div className="text-sm font-semibold text-amber-800">{hol.localName || hol.name || 'Holiday'}</div>
                             </div>
                           </div>
                         )}
@@ -671,9 +823,30 @@ export default function CalendarPage() {
                           <div className="pt-3 mt-3 border-t-2 border-slate-100">
                             <h5 className="text-xs font-bold text-slate-700 dark:text-slate-300 uppercase tracking-wider mb-2">Upcoming Events</h5>
                             <div className="space-y-2">
-                              {events.filter(e => toYMD(e.date) >= toYMD(selectedDate)).slice(0,3).map(u => (
+                              {events
+                                  .filter(e => {
+                                    try {
+                                      // include events on or after the selected date
+                                      const evDate = toYMD(e.date);
+                                      return evDate >= toYMD(selectedDate);
+                                    } catch (err) { return false; }
+                                  })
+                                  // sort by date then startTime (empty times sort last)
+                                  .sort((a, b) => {
+                                    const da = toYMD(a.date);
+                                    const db = toYMD(b.date);
+                                    if (da < db) return -1;
+                                    if (da > db) return 1;
+                                    const ta = a.startTime || '';
+                                    const tb = b.startTime || '';
+                                    if (ta === tb) return 0;
+                                    if (!ta) return 1;
+                                    if (!tb) return -1;
+                                    return ta.localeCompare(tb);
+                                  })
+                                  .slice(0,3).map(u => (
                                 <div key={`up-${u.id}`} className="flex items-center gap-2 text-xs p-2 bg-slate-50 rounded-md hover:bg-blue-50 transition-colors">
-                                  <div className={`w-2 h-2 ${u.color} rounded-full flex-shrink-0`}></div>
+                                  <div className={`${u.color} rounded-full flex-shrink-0`} style={{ width: 8, height: 8, display: 'inline-block', minWidth: 0, minHeight: 0, lineHeight: 0, boxSizing: 'content-box', borderWidth: '1px' }}></div>
                                   <span className="font-medium text-slate-900 dark:text-slate-100 truncate flex-1">{u.title}</span>
                                   <span className="text-slate-700 dark:text-slate-300 text-xs">{(() => { const [yy,mm,dd] = toYMD(u.date).split('-'); return `${Number(dd)}/${Number(mm)}` })()}</span>
                                 </div>
@@ -698,44 +871,51 @@ export default function CalendarPage() {
       </main>
 
   <Dialog open={showEventModal} onOpenChange={(open) => { setShowEventModal(open); if (!open) { setSelectedEvent(null); resetForm(); } }}>
-  <DialogContent data-state={showEventModal ? 'open' : 'closed'} className="max-w-xl max-h-[90vh] rounded-2xl border border-slate-200 shadow-2xl cozy dialog-cozy flex flex-col overflow-hidden">
-          <DialogHeader className="pb-0 border-b border-slate-200">
-            <div className="flex items-center justify-between p-5">
-              <div className="flex items-center gap-3">
-                <div className={`w-10 h-10 bg-gradient-to-br from-purple-600 to-purple-700 rounded-xl flex items-center justify-center shadow-md`}>
+        <DialogContent data-state={showEventModal ? 'open' : 'closed'} className="max-w-2xl max-h-[85vh] rounded-2xl border border-slate-200/80 shadow-2xl cozy dialog-cozy flex flex-col overflow-hidden bg-white">
+          <DialogHeader className="border-b border-slate-100 bg-gradient-to-r from-purple-50/50 via-white to-blue-50/50">
+            <div className="flex items-center justify-between px-6 py-5">
+              <div className="flex items-center gap-4">
+                <div className="w-12 h-12 bg-gradient-to-br from-purple-600 to-purple-700 rounded-xl flex items-center justify-center shadow-lg shadow-purple-500/20">
                   {selectedEvent ? <Edit3 className="w-5 h-5 text-white" /> : <Plus className="w-5 h-5 text-white" />}
                 </div>
-                <DialogTitle className="text-2xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-purple-700 to-purple-600">
-                  {selectedEvent ? 'Edit Event' : 'Create New Event'}
-                </DialogTitle>
+                <div>
+                  <DialogTitle className="text-2xl font-bold text-slate-900">
+                    {selectedEvent ? 'Edit Event' : 'Create Event'}
+                  </DialogTitle>
+                  <p className="text-sm text-slate-500 mt-0.5">
+                    {selectedEvent ? 'Update event details' : 'Add a new event to your calendar'}
+                  </p>
+                </div>
               </div>
-              <div>
-                <button onClick={() => { setShowEventModal(false); setSelectedEvent(null); resetForm(); }} className="p-2 rounded-md hover:bg-slate-100">
-                  <X className="w-4 h-4" />
-                </button>
-              </div>
+              <button 
+                onClick={() => { setShowEventModal(false); setSelectedEvent(null); resetForm(); }} 
+                className="p-2 rounded-lg hover:bg-slate-100 transition-colors"
+                aria-label="Close dialog"
+              >
+                <X className="w-5 h-5 text-slate-400" />
+              </button>
             </div>
           </DialogHeader>
 
-          {/* Scrollable body */}
-          <div className="p-5 overflow-y-auto hide-scrollbar flex-1 space-y-5">
+          <div className="px-6 py-6 overflow-y-auto hide-scrollbar flex-1 space-y-6">
             <div className="space-y-2">
-              <Label htmlFor="title" className="text-sm font-bold text-slate-800 dark:text-slate-100 flex items-center gap-2">
+              <Label htmlFor="title" className="text-sm font-semibold text-slate-700 flex items-center gap-1.5">
                 Event Title <span className="text-red-500">*</span>
               </Label>
-                <Input 
+              <Input 
                 id="title" 
                 type="text" 
                 value={newEvent.title} 
                 onChange={(e) => setNewEvent({ ...newEvent, title: e.target.value })} 
                 placeholder="e.g., Team Meeting, Project Deadline" 
-                className="h-11 text-base rounded-xl border-2 border-slate-200 focus:border-purple-400 focus:ring-4 focus:ring-purple-100 transition-all"
+                className="h-12 text-base rounded-lg border-2 border-slate-200 focus:border-purple-500 focus:ring-2 focus:ring-purple-200 transition-all"
+                required
               />
             </div>
 
             <div className="grid grid-cols-2 gap-4">
               <div className="space-y-2">
-                <Label htmlFor="date" className="text-sm font-bold text-slate-800 dark:text-slate-100 flex items-center gap-2">
+                <Label htmlFor="date" className="text-sm font-semibold text-slate-700 flex items-center gap-1.5">
                   Date <span className="text-red-500">*</span>
                 </Label>
                 <Input 
@@ -743,16 +923,17 @@ export default function CalendarPage() {
                   type="date" 
                   value={newEvent.date} 
                   onChange={(e) => setNewEvent({ ...newEvent, date: e.target.value })} 
-                  className="h-11 rounded-xl border-2 border-slate-200 focus:border-purple-400 focus:ring-4 focus:ring-purple-100 transition-all"
+                  className="h-12 rounded-lg border-2 border-slate-200 focus:border-purple-500 focus:ring-2 focus:ring-purple-200 transition-all"
+                  required
                 />
               </div>
               <div className="space-y-2">
-                <Label htmlFor="type" className="text-sm font-bold text-slate-800 dark:text-slate-100">Event Type</Label>
+                <Label htmlFor="type" className="text-sm font-semibold text-slate-700">Type</Label>
                 <select
                   id="type"
                   value={newEvent.type}
                   onChange={(e) => setNewEvent({ ...newEvent, type: e.target.value })}
-                  className="h-11 rounded-xl border-2 border-slate-200 focus:border-purple-400 focus:ring-4 focus:ring-purple-100 transition-all px-3 w-full"
+                  className="h-12 rounded-lg border-2 border-slate-200 focus:border-purple-500 focus:ring-2 focus:ring-purple-200 transition-all px-3 w-full bg-white text-slate-900"
                 >
                   <option value="event">Event</option>
                   <option value="class">Class</option>
@@ -764,54 +945,55 @@ export default function CalendarPage() {
 
             <div className="grid grid-cols-2 gap-4">
               <div className="space-y-2">
-                <Label htmlFor="startTime" className="text-sm font-bold text-slate-800 dark:text-slate-100">Start Time</Label>
+                <Label htmlFor="startTime" className="text-sm font-semibold text-slate-700">Start Time</Label>
                 <Input 
                   id="startTime" 
                   type="time" 
                   value={newEvent.startTime} 
                   onChange={(e) => setNewEvent({ ...newEvent, startTime: e.target.value })} 
-                  className="h-11 rounded-xl border-2 border-slate-200 focus:border-purple-400 focus:ring-4 focus:ring-purple-100 transition-all"
+                  className="h-12 rounded-lg border-2 border-slate-200 focus:border-purple-500 focus:ring-2 focus:ring-purple-200 transition-all"
                 />
               </div>
               <div className="space-y-2">
-                <Label htmlFor="endTime" className="text-sm font-bold text-slate-800 dark:text-slate-100">End Time</Label>
+                <Label htmlFor="endTime" className="text-sm font-semibold text-slate-700">End Time</Label>
                 <Input 
                   id="endTime" 
                   type="time" 
                   value={newEvent.endTime} 
                   onChange={(e) => setNewEvent({ ...newEvent, endTime: e.target.value })} 
-                  className="h-11 rounded-xl border-2 border-slate-200 focus:border-purple-400 focus:ring-4 focus:ring-purple-100 transition-all"
+                  className="h-12 rounded-lg border-2 border-slate-200 focus:border-purple-500 focus:ring-2 focus:ring-purple-200 transition-all"
                 />
               </div>
             </div>
 
             <div className="space-y-2">
-              <Label htmlFor="location" className="text-sm font-bold text-slate-800 dark:text-slate-100">Location</Label>
+              <Label htmlFor="location" className="text-sm font-semibold text-slate-700">Location</Label>
               <Input 
                 id="location" 
                 type="text" 
                 value={newEvent.location} 
                 onChange={(e) => setNewEvent({ ...newEvent, location: e.target.value })} 
                 placeholder="e.g., Room 301, Online, Conference Hall" 
-                className="h-11 text-base rounded-xl border-2 border-slate-200 focus:border-blue-400 focus:ring-4 focus:ring-blue-100 transition-all"
+                className="h-12 text-base rounded-lg border-2 border-slate-200 focus:border-purple-500 focus:ring-2 focus:ring-purple-200 transition-all"
               />
             </div>
 
             <div className="space-y-2">
-              <Label className="text-sm font-bold text-slate-800 dark:text-slate-100 block">
-                Color Theme
-              </Label>
-              <div className="flex gap-2 flex-wrap">
+              <Label className="text-sm font-semibold text-slate-700">Color</Label>
+              <div className="flex gap-2.5 flex-wrap">
                 {['bg-primary','bg-secondary','bg-accent','bg-info','bg-success','bg-warning','bg-error','bg-neutral'].map(color => (
                   <button
                     key={color}
                     type="button"
-                    onClick={() => setNewEvent({ ...newEvent, color })}
-                    className={`w-10 h-10 ${color} rounded-xl transition-all duration-200 hover:scale-110 ${
-                          newEvent.color === color 
-                            ? 'ring-4 ring-offset-2 ring-purple-400 shadow-lg scale-105' 
-                            : 'hover:shadow-md'
-                        }`}
+                    onClick={() => {
+                      try { localStorage.setItem('up:lastEventColor', color); } catch (e) {}
+                      setNewEvent({ ...newEvent, color });
+                    }}
+                    className={`w-11 h-11 ${color} rounded-lg transition-all duration-200 ${
+                      newEvent.color === color 
+                        ? 'ring-3 ring-offset-2 ring-slate-400 shadow-lg scale-105' 
+                        : 'hover:scale-105 hover:shadow-md'
+                    }`}
                     aria-label={`Select ${color} color`}
                   />
                 ))}
@@ -819,42 +1001,40 @@ export default function CalendarPage() {
             </div>
 
             <div className="space-y-2">
-              <Label htmlFor="description" className="text-sm font-bold text-slate-800 dark:text-slate-100">
-                Description
-              </Label>
+              <Label htmlFor="description" className="text-sm font-semibold text-slate-700">Description</Label>
               <Textarea
                 id="description"
                 value={newEvent.description}
                 onChange={(e) => setNewEvent({ ...newEvent, description: e.target.value })}
-                rows={3}
+                rows={4}
                 placeholder="Add any additional details about this event..."
-                className="text-base rounded-xl border-2 border-slate-200 focus:border-purple-400 focus:ring-4 focus:ring-purple-100 transition-all resize-none"
+                className="text-base rounded-lg border-2 border-slate-200 focus:border-purple-500 focus:ring-2 focus:ring-purple-200 transition-all resize-none"
               />
             </div>
-
           </div>
 
-          {/* Sticky footer with actions */}
-          <div className="border-t border-slate-200 p-4 cozy sticky bottom-0 z-20">
+          <div className="border-t border-slate-100 px-6 py-4 bg-slate-50/50">
             <div className="flex gap-3">
               <Button 
                 onClick={() => { setShowEventModal(false); setSelectedEvent(null); resetForm(); }} 
                 variant="outline" 
-                className="flex-1 border-2 border-slate-200 hover:bg-slate-50 rounded-xl h-11 font-medium"
+                className="flex-1 h-11 border-slate-300 hover:bg-slate-100 rounded-lg font-medium text-slate-700"
               >
                 Cancel
               </Button>
               {selectedEvent && (
                 <Button 
                   onClick={() => { handleDeleteEvent(selectedEvent); }} 
-                  className="border-2 border-red-200 hover:bg-red-50 text-red-700 rounded-xl h-11 px-4 font-medium"
+                  variant="outline"
+                  className="h-11 px-5 border-red-300 hover:bg-red-50 text-red-600 hover:text-red-700 rounded-lg font-medium"
                 >
                   Delete
                 </Button>
               )}
               <Button 
                 onClick={selectedEvent ? handleUpdateEvent : handleCreateEvent} 
-                className="flex-1 bg-gradient-to-r from-purple-600 to-purple-700 hover:from-purple-700 hover:to-purple-800 text-white shadow-lg shadow-purple-500/25 rounded-xl h-11 font-medium"
+                disabled={!newEvent.title || !newEvent.date}
+                className="flex-1 h-11 bg-gradient-to-r from-purple-600 to-purple-700 hover:from-purple-700 hover:to-purple-800 text-white shadow-md hover:shadow-lg disabled:opacity-50 disabled:cursor-not-allowed rounded-lg font-medium transition-all"
               >
                 {selectedEvent ? 'Update Event' : 'Create Event'}
               </Button>
@@ -907,22 +1087,68 @@ export default function CalendarPage() {
           padding: 0 !important; /* internal spacing handled by outer padding */
         }
         .calendar-root [role="gridcell"] .flex.flex-wrap {
-          /* events area */
+          /* fallback for older markup: keep flow */
           margin-top: 6px;
           display: block !important;
-          overflow: hidden;
-          max-height: 180px;
         }
 
-        /* Reduce grid gaps slightly so 6-row months fit vertically without scrolling */
-        .calendar-root .grid[role="grid"] { gap: 6px 6px; }
+        /* New tidy events area: position dots inset from bottom-left */
+        .calendar-root [role="gridcell"] .events-area {
+          position: absolute;
+          left: 10px;
+          right: 10px;
+          bottom: 10px;
+          display: flex;
+          align-items: center;
+          pointer-events: none; /* allow clicks to pass to cell except on buttons */
+        }
+        .calendar-root [role="gridcell"] .events-area > .flex {
+          pointer-events: auto; /* enable clicking event buttons */
+        }
+
+        /* Reduce grid gaps slightly and compute a dynamic row height so the
+           calendar visually occupies 6 rows but will shrink rows to fit the
+           viewport when needed (avoids internal scrollbars). */
+        .calendar-root .grid[role="grid"] {
+          gap: 6px 6px;
+          /* Prefer a comfortable row height but shrink to fit available
+             viewport space: subtract an allowance for header/controls (220px)
+             and gap space (30px) before dividing into 6 rows. */
+          --calendar-row-height: min(84px, calc((100vh - 220px - 30px) / 6));
+          grid-auto-rows: var(--calendar-row-height);
+          height: calc(var(--calendar-row-height) * 6 + 30px);
+          overflow: visible; /* let content flow; rows will shrink instead */
+        }
 
         /* Responsive: compress spacing further on narrow viewports */
         @media (max-width: 900px) {
           .calendar-root [role="gridcell"] { min-height: 64px; padding: 0.375rem !important; }
-          .calendar-root .grid[role="grid"] { gap: 4px 4px; }
+          .calendar-root .grid[role="grid"] {
+            gap: 4px 4px;
+            --calendar-row-height: min(72px, calc((100vh - 180px - 20px) / 6));
+            grid-auto-rows: var(--calendar-row-height);
+            height: calc(var(--calendar-row-height) * 6 + 20px);
+            overflow: visible;
+          }
         }
-        .calendar-root [role="gridcell"] .event-dot { margin-right: 6px; }
+  .calendar-root [role="gridcell"] .event-dot { margin-right: 6px; z-index: 10; position: relative; }
+  /* Grid cell dots: allow a slightly larger but still subtle marker (8px).
+     Keep sizing constrained so other utilities don't inflate them. */
+  .calendar-root [role="gridcell"] .event-dot {
+    width: 8px !important;
+    height: 8px !important;
+    padding: 0 !important;
+    display: inline-block !important;
+    min-width: 0 !important;
+    min-height: 0 !important;
+    line-height: 0 !important;
+    box-sizing: content-box !important;
+    border-width: 1px !important;
+    border-radius: 50% !important;
+  }
+
+  /* Ensure gridcells provide a positioning context for absolute events */
+  .calendar-root [role="gridcell"] { position: relative; }
 
         /* Make sure the selected (today) pill is visible and doesn't collapse */
         .calendar-root .cozy.border-purple-300 {
@@ -1005,12 +1231,17 @@ export default function CalendarPage() {
         .event-dot { 
           transition: transform 150ms ease, box-shadow 150ms ease; 
         }
-        .event-dot:hover { 
-          transform: scale(1.25); 
-          box-shadow: 0 4px 12px rgba(0,0,0,0.15); 
+        /* Slightly smaller hover only for grid dots to avoid huge pop */
+        .calendar-root [role="gridcell"] .event-dot:hover {
+          transform: scale(1.12);
+          box-shadow: 0 1px 4px rgba(0,0,0,0.06);
         }
+        /* Keep other event-dot hover rules (global) mild as well */
+        .event-dot:hover { transform: scale(1.08); box-shadow: 0 1px 3px rgba(0,0,0,0.06); }
         .hide-scrollbar::-webkit-scrollbar { display: none; }
         .hide-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+        /* Ensure svgs in header/nav inherit visible color */
+        .calendar-root header svg, .calendar-root .text-slate-700 svg { color: inherit !important; stroke: currentColor !important; fill: none !important; }
       `}</style>
       {toast && (
         <div className="fixed bottom-6 right-6 z-50 max-w-sm w-full rounded-lg shadow-lg" role="status" aria-live="polite">
