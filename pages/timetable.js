@@ -34,9 +34,68 @@ function mapToSchedulerEvents(list) {
       }
     } catch (err) {}
 
-    const durationMinutes = Number(parsedDuration ?? e.durationMinutes ?? e.duration ?? 60)
+    // If the API returned a structured `meta` object (preferred), use that
+    // duration when available. Older deployments may embed meta into description
+    // (handled above) but modern responses include a `meta` JSON property.
+    try {
+      if ((e && e.meta && typeof e.meta.durationMinutes !== 'undefined') && (parsedDuration === null || typeof parsedDuration === 'undefined')) {
+        parsedDuration = Number(e.meta.durationMinutes);
+      }
+    } catch (err) {}
+
+    // Prefer an explicit duration (meta or fields) and compute end relative to the
+    // parsed start. This avoids mixing server-produced ISO instants (which can
+    // represent a different absolute instant depending on server timezone) with
+    // client-local date+time composition which can cause displayed end times to
+    // shift unexpectedly. Only fall back to raw end values when a duration is
+    // not available.
+    const durationMinutesRaw = parsedDuration ?? e.durationMinutes ?? e.duration;
+    const durationMinutes = (typeof durationMinutesRaw !== 'undefined' && durationMinutesRaw !== null) ? Number(durationMinutesRaw) : null;
     const rawEnd = e.endDate || e.end_date || (e.raw && (e.raw.endDate || e.raw.end_date));
-    const endDate = rawEnd ? new Date(String(rawEnd)) : new Date(start.getTime() + durationMinutes * 60000);
+    let endDate;
+    if (durationMinutes !== null && !Number.isNaN(Number(durationMinutes))) {
+      endDate = new Date(start.getTime() + Number(durationMinutes) * 60000);
+    } else if (rawEnd) {
+      // If rawEnd is a date-only string (YYYY-MM-DD) we'll treat it conservatively
+      // as local midnight on that date and then prefer computing duration from
+      // start where possible. Otherwise parse the ISO/explicit raw end value.
+      try {
+        const s = String(rawEnd);
+        if (/^\d{4}-\d{2}-\d{2}$/.test(s)) {
+          // parse as local date at midnight then fall back to a 60-minute duration
+          const [yy, mm, dd] = s.split('-').map(Number);
+          const parsedDateOnly = new Date(yy, (mm || 1) - 1, dd, 0, 0, 0);
+          // if parsedDateOnly equals the start's date, assume a default 60-minute duration
+          if (parsedDateOnly.getFullYear() === start.getFullYear() && parsedDateOnly.getMonth() === start.getMonth() && parsedDateOnly.getDate() === start.getDate()) {
+            endDate = new Date(start.getTime() + 60 * 60000);
+          } else {
+            // otherwise use midnight on the raw end date
+            endDate = parsedDateOnly;
+          }
+        } else {
+          endDate = new Date(String(rawEnd));
+        }
+      } catch (err) {
+        endDate = new Date(start.getTime() + 60 * 60000);
+      }
+    } else {
+      // No duration and no raw end: default to 60 minutes
+      endDate = new Date(start.getTime() + 60 * 60000);
+    }
+
+    // Debug logging to trace how start/end are derived for each incoming event.
+    try {
+      console.debug('[mapToSchedulerEvents] event', {
+        id: e.id,
+        dateStr,
+        timeStr,
+        parsedStart: start.toISOString(),
+        rawEnd,
+        parsedEnd: endDate instanceof Date ? endDate.toISOString() : String(endDate),
+        durationMinutes,
+        raw: e
+      })
+    } catch (inner) {}
     
     return {
       id: String(e.id ?? `tmp-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`),

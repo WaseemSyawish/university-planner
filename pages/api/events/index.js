@@ -450,6 +450,11 @@ export default async function handler(req, res) {
                     } catch (e) { /* ignore */ }
                   }
 
+                  // Debug: log server-side computed occStart and end_date for each materialized occurrence
+                  try {
+                    console.info('[api/events] materialize (no-template) occStart:', occStart && occStart.toISOString ? occStart.toISOString() : String(occStart), 'computed end_date:', createData.end_date && createData.end_date.toISOString ? createData.end_date.toISOString() : String(createData.end_date));
+                  } catch (e) {}
+
                   // Attach meta when available; otherwise include durationMinutes so client can reconstruct
                   if (metaToStore !== null) {
                     createData.meta = metaToStore;
@@ -537,6 +542,10 @@ export default async function handler(req, res) {
                       }
                     } catch (e) { /* ignore */ }
                   }
+                  // Debug: log server-side computed occStart and end_date for each materialized occurrence (template path)
+                  try {
+                    console.info('[api/events] materialize (template) occStart:', occStart && occStart.toISOString ? occStart.toISOString() : String(occStart), 'computed end_date:', createData.end_date && createData.end_date.toISOString ? createData.end_date.toISOString() : String(createData.end_date));
+                  } catch (e) {}
                   if (metaToStore !== null) {
                     createData.meta = metaToStore;
                     if ((typeof durationMinutes !== 'undefined' && durationMinutes !== null) && !createData.meta.durationMinutes) {
