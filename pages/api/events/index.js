@@ -395,14 +395,25 @@ export default async function handler(req, res) {
               for (const d of occDates) {
                   try {
                   // Compute occurrence start datetime (date `d` may be a Date)
-                  const occStart = (d instanceof Date) ? new Date(d) : new Date(String(d));
-                  if (time && typeof time === 'string') {
-                    const parts = String(time).split(':');
-                    const hh = Number(parts[0] || 0);
-                    const mm = Number(parts[1] || 0);
-                    if (Number.isFinite(hh) && Number.isFinite(mm)) {
-                      occStart.setHours(hh, mm, 0, 0);
+                  // Build occurrence start as a deterministic UTC instant from date (d) and time
+                  // Avoid calling setHours on a Date parsed from a string (can be timezone-dependent).
+                  let occStart;
+                  try {
+                    const dateObj = (d instanceof Date) ? d : new Date(String(d));
+                    // Extract year/month/day from the date-only value in local terms
+                    const y = dateObj.getFullYear();
+                    const m = dateObj.getMonth();
+                    const day = dateObj.getDate();
+                    let hh = 0, mm = 0;
+                    if (time && typeof time === 'string') {
+                      const parts = String(time).split(':');
+                      hh = Number(parts[0] || 0);
+                      mm = Number(parts[1] || 0);
                     }
+                    // Use Date.UTC to create a UTC instant for the specified local Y/M/D and HH:MM
+                    occStart = new Date(Date.UTC(y, m, day, Number.isFinite(hh) ? hh : 0, Number.isFinite(mm) ? mm : 0, 0));
+                  } catch (e) {
+                    occStart = (d instanceof Date) ? new Date(d) : new Date(String(d));
                   }
 
                   // Determine durationMinutes for this occurrence. Prefer explicit durationMinutes
@@ -457,12 +468,16 @@ export default async function handler(req, res) {
 
                   // Attach meta when available; otherwise include durationMinutes so client can reconstruct
                   if (metaToStore !== null) {
-                    createData.meta = metaToStore;
-                    if ((typeof durationMinutes !== 'undefined' && durationMinutes !== null) && !createData.meta.durationMinutes) {
-                      try { createData.meta = { ...createData.meta, durationMinutes: Number(durationMinutes) }; } catch (e) {}
-                    }
+                    try {
+                      // clone to avoid mutating caller-provided object
+                      const m = { ...metaToStore };
+                      if ((typeof durationMinutes !== 'undefined' && durationMinutes !== null) && !m.durationMinutes) m.durationMinutes = Number(durationMinutes);
+                      // ensure meta.endDate reflects the computed end_date (if present)
+                      if (createData.end_date && !(m.endDate)) m.endDate = createData.end_date instanceof Date ? createData.end_date.toISOString() : String(createData.end_date);
+                      createData.meta = m;
+                    } catch (e) { createData.meta = metaToStore; }
                   } else if (occDurationMinutes !== null) {
-                    createData.meta = { durationMinutes: Number(occDurationMinutes) };
+                    createData.meta = { durationMinutes: Number(occDurationMinutes), endDate: createData.end_date instanceof Date ? createData.end_date.toISOString() : createData.end_date };
                   }
                   try { console.info('[api/events] creating materialized event (no template) with data:', JSON.stringify({ ...createData, meta: undefined }).slice(0,2000)); } catch(e) {}
                   const ev = await createEventWithFallback(tx, createData);
@@ -496,14 +511,22 @@ export default async function handler(req, res) {
               for (const d of occDates) {
                   try {
                   // Compute occurrence start datetime and end_date similar to non-template path
-                  const occStart = (d instanceof Date) ? new Date(d) : new Date(String(d));
-                  if (time && typeof time === 'string') {
-                    const parts = String(time).split(':');
-                    const hh = Number(parts[0] || 0);
-                    const mm = Number(parts[1] || 0);
-                    if (Number.isFinite(hh) && Number.isFinite(mm)) {
-                      occStart.setHours(hh, mm, 0, 0);
+                  // Build occurrence start as a deterministic UTC instant from date (d) and time
+                  let occStart;
+                  try {
+                    const dateObj = (d instanceof Date) ? d : new Date(String(d));
+                    const y = dateObj.getFullYear();
+                    const m = dateObj.getMonth();
+                    const day = dateObj.getDate();
+                    let hh = 0, mm = 0;
+                    if (time && typeof time === 'string') {
+                      const parts = String(time).split(':');
+                      hh = Number(parts[0] || 0);
+                      mm = Number(parts[1] || 0);
                     }
+                    occStart = new Date(Date.UTC(y, m, day, Number.isFinite(hh) ? hh : 0, Number.isFinite(mm) ? mm : 0, 0));
+                  } catch (e) {
+                    occStart = (d instanceof Date) ? new Date(d) : new Date(String(d));
                   }
                   let occDurationMinutes = null;
                   if (typeof durationMinutes !== 'undefined' && durationMinutes !== null) {
@@ -547,12 +570,14 @@ export default async function handler(req, res) {
                     console.info('[api/events] materialize (template) occStart:', occStart && occStart.toISOString ? occStart.toISOString() : String(occStart), 'computed end_date:', createData.end_date && createData.end_date.toISOString ? createData.end_date.toISOString() : String(createData.end_date));
                   } catch (e) {}
                   if (metaToStore !== null) {
-                    createData.meta = metaToStore;
-                    if ((typeof durationMinutes !== 'undefined' && durationMinutes !== null) && !createData.meta.durationMinutes) {
-                      try { createData.meta = { ...createData.meta, durationMinutes: Number(durationMinutes) }; } catch (e) {}
-                    }
+                    try {
+                      const m = { ...metaToStore };
+                      if ((typeof durationMinutes !== 'undefined' && durationMinutes !== null) && !m.durationMinutes) m.durationMinutes = Number(durationMinutes);
+                      if (createData.end_date && !m.endDate) m.endDate = createData.end_date instanceof Date ? createData.end_date.toISOString() : String(createData.end_date);
+                      createData.meta = m;
+                    } catch (e) { createData.meta = metaToStore; }
                   } else if (occDurationMinutes !== null) {
-                    createData.meta = { durationMinutes: Number(occDurationMinutes) };
+                    createData.meta = { durationMinutes: Number(occDurationMinutes), endDate: createData.end_date instanceof Date ? createData.end_date.toISOString() : createData.end_date };
                   }
                   try { console.info('[api/events] creating materialized event for template with data:', JSON.stringify({ ...createData, meta: undefined }).slice(0,2000)); } catch(e) {}
                   const ev = await createEventWithFallback(tx, createData);

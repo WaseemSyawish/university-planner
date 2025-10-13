@@ -1,12 +1,10 @@
 // backfill_end_dates.js
-// Scans events where end_date is null and attempts to compute an end_date from
-// - meta.endDate
-// - meta.durationMinutes
-// - embedded __META__ in description (JSON)
-// Usage: node scripts/backfill_end_dates.js
+// Safer backfill: dry-run by default; pass --apply to perform updates.
+// Usage:
+//   node scripts/backfill_end_dates.js --limit=200 --dry
+//   node scripts/backfill_end_dates.js --limit=200 --apply
 
-const { PrismaClient } = require('@prisma/client');
-const prisma = new PrismaClient();
+const prisma = require('../lib/prisma');
 
 function parseMetaFromDescription(desc) {
   if (!desc || typeof desc !== 'string') return null;
@@ -17,76 +15,72 @@ function parseMetaFromDescription(desc) {
   try { return JSON.parse(jsonPart); } catch (e) { return null; }
 }
 
-function parseDateOnlyToLocal(date) {
-  if (!date) return null;
-  const d = new Date(String(date));
-  if (!isNaN(d.getTime())) return d;
-  return null;
+function coerceDateObj(d) {
+  if (!d) return null;
+  if (Object.prototype.toString.call(d) === '[object Date]') return d;
+  const s = String(d);
+  const parsed = new Date(s);
+  return isNaN(parsed.getTime()) ? null : parsed;
 }
 
 (async function main(){
   try {
-    const candidates = await prisma.event.findMany({ where: { end_date: null }, take: 1000 });
-    console.log('Found', candidates.length, 'events with null end_date (limiting to 1000)');
-    let updated = 0;
-    for (const ev of candidates) {
-      let meta = ev.meta || null;
-      if (!meta && ev.description) meta = parseMetaFromDescription(ev.description) || null;
-      let endDate = null;
-      if (meta && meta.endDate) {
-        const parsed = new Date(String(meta.endDate));
-        if (!isNaN(parsed.getTime())) endDate = parsed;
-      }
-      // If no explicit endDate, use durationMinutes
-      if (!endDate && meta && typeof meta.durationMinutes !== 'undefined' && meta.durationMinutes !== null) {
-        try {
-          // Build a start Date from ev.date + ev.time (if available)
-          let start = null;
-          if (ev.date) start = new Date(String(ev.date));
-          if (start && ev.time) {
-            const parts = String(ev.time).split(':');
-            const hh = Number(parts[0] || 0);
-            const mm = Number(parts[1] || 0);
-            if (Number.isFinite(hh) && Number.isFinite(mm)) start.setHours(hh, mm, 0, 0);
-          }
-          if (!start) start = new Date();
-          endDate = new Date(start.getTime() + Number(meta.durationMinutes) * 60000);
-        } catch (e) { /* ignore */ }
-      }
-      if (!endDate && ev.description) {
-        // try to find an embedded __META__ with endDate/duration
-        const embedded = parseMetaFromDescription(ev.description);
-        if (embedded && embedded.endDate) {
-          const parsed = new Date(String(embedded.endDate));
-          if (!isNaN(parsed.getTime())) endDate = parsed;
-        } else if (embedded && typeof embedded.durationMinutes !== 'undefined' && embedded.durationMinutes !== null) {
-          try {
-            let start = ev.date ? new Date(String(ev.date)) : new Date();
-            if (ev.time) {
-              const parts = String(ev.time).split(':');
-              const hh = Number(parts[0] || 0);
-              const mm = Number(parts[1] || 0);
-              if (Number.isFinite(hh) && Number.isFinite(mm)) start.setHours(hh, mm, 0, 0);
-            }
-            endDate = new Date(start.getTime() + Number(embedded.durationMinutes) * 60000);
-          } catch (e) {}
-        }
-      }
+    const args = process.argv.slice(2);
+    const apply = args.includes('--apply');
+    const limitArg = args.find(a => a.startsWith('--limit='));
+    const limit = limitArg ? Math.min(2000, Math.max(1, Number(limitArg.split('=')[1] || 200))) : 200;
 
-      if (endDate) {
-        try {
-          await prisma.event.update({ where: { id: ev.id }, data: { end_date: endDate } });
-          console.log('Updated', ev.id, '->', endDate.toISOString());
-          updated += 1;
-        } catch (e) {
-          console.error('Failed to update', ev.id, e && e.message ? e.message : e);
+    console.log('Backfill started. apply=', apply, 'limit=', limit);
+
+    const candidates = await prisma.event.findMany({ where: {}, take: limit, orderBy: { created_at: 'desc' }, select: { id: true, date: true, time: true, meta: true, description: true, end_date: true } });
+    console.log('Scanning', candidates.length, 'events');
+    const fixes = [];
+
+    for (const ev of candidates) {
+      try {
+        let meta = ev.meta || null;
+        if (!meta && ev.description) meta = parseMetaFromDescription(ev.description) || null;
+        const dateObj = coerceDateObj(ev.date);
+        if (!dateObj) continue;
+        const dateY = dateObj.getFullYear();
+        const dateM = dateObj.getMonth();
+        const dateD = dateObj.getDate();
+        const timeParts = String(ev.time || '09:00').split(':');
+        const hh = Number(timeParts[0] || 9);
+        const mm = Number(timeParts[1] || 0);
+
+        const duration = meta && Number.isFinite(Number(meta.durationMinutes)) ? Number(meta.durationMinutes) : null;
+        if (duration === null) continue; // nothing reliable to recompute
+
+        const expectedStart = new Date(Date.UTC(dateY, dateM, dateD, hh, mm, 0));
+        const expectedEnd = new Date(expectedStart.getTime() + Number(duration) * 60000);
+        const expectedIso = expectedEnd.toISOString();
+
+        const existing = ev.end_date ? (ev.end_date instanceof Date ? ev.end_date.toISOString() : String(ev.end_date)) : null;
+        if (existing !== expectedIso) {
+          fixes.push({ id: ev.id, date: `${dateY}-${(dateM+1).toString().padStart(2,'0')}-${dateD.toString().padStart(2,'0')}`, time: ev.time || null, existing, expectedIso });
+          if (apply) {
+            try {
+              const newMeta = meta ? { ...meta, endDate: expectedIso } : { durationMinutes: duration, endDate: expectedIso };
+              await prisma.event.update({ where: { id: ev.id }, data: { end_date: expectedIso, meta: newMeta } });
+              console.log('Applied:', ev.id, '->', expectedIso);
+            } catch (e) {
+              console.error('Failed to apply fix for', ev.id, e && e.message ? e.message : e);
+            }
+          }
         }
+      } catch (e) {
+        console.error('Failed processing row', ev.id, e && e.message ? e.message : e);
       }
     }
-    console.log('Backfill complete. Updated', updated, 'rows.');
+
+    console.log('Mismatches found:', fixes.length);
+    if (fixes.length > 0) console.log(fixes.slice(0, 50));
+    console.log('Done.');
   } catch (e) {
     console.error('Backfill failed:', e && e.message ? e.message : e);
   } finally {
-    await prisma.$disconnect();
+    try { await prisma.$disconnect(); } catch (e) {}
+    process.exit(0);
   }
 })();
