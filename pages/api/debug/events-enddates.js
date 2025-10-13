@@ -1,4 +1,4 @@
-const prisma = require('../../../../lib/prisma');
+const prisma = require('../../../lib/prisma');
 
 function localDateOnlyString(d) {
   if (!d) return null;
@@ -18,7 +18,7 @@ export default async function handler(req, res) {
     if (!req.query || req.query.secret !== secret) return res.status(401).json({ error: 'Unauthorized' });
 
     const limit = Math.min(200, Number(req.query.limit) || 50);
-    const events = await prisma.event.findMany({ orderBy: { created_at: 'desc' }, take: limit, select: { id: true, title: true, date: true, time: true, end_date: true, meta: true, template_id: true, created_at: true } });
+  const events = await prisma.event.findMany({ orderBy: { created_at: 'desc' }, take: limit, select: { id: true, title: true, date: true, time: true, end_date: true, meta: true, created_at: true } });
 
     const out = events.map(ev => ({
       id: ev.id,
@@ -27,7 +27,7 @@ export default async function handler(req, res) {
       time: ev.time || null,
       end_date: ev.end_date ? (ev.end_date instanceof Date ? ev.end_date.toISOString() : String(ev.end_date)) : null,
       meta: ev.meta || null,
-      template_id: ev.template_id || null,
+  template_id: ev.template_id || null,
       created_at: ev.created_at ? (ev.created_at instanceof Date ? ev.created_at.toISOString() : String(ev.created_at)) : null
     }));
 

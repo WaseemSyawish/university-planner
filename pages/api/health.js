@@ -16,6 +16,4 @@ export default function handler(req, res) {
     res.status(500).json({ status: 'error', error: String(err) });
   }
 }
-export default function handler(req, res) {
-  res.status(200).json({ status: 'ok', timestamp: Date.now() });
-}
+
