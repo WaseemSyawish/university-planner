@@ -126,9 +126,9 @@ export default function RecurrenceModal({
   };
 
   const renderPage1 = () => (
-    <div className="space-y-4">
+    <div className="space-y-3">
       <div>
-        <Label className="text-sm font-medium text-gray-700 mb-2 flex items-center gap-1.5">
+        <Label className="text-xs font-semibold text-gray-700 mb-2 flex items-center gap-1.5">
           <Calendar className="w-3.5 h-3.5" />
           Weekdays
         </Label>
@@ -139,10 +139,10 @@ export default function RecurrenceModal({
               type="button"
               onClick={() => toggleWeekday(idx)}
               className={cn(
-                'h-9 rounded-md border font-medium text-xs transition-all',
+                'h-9 rounded-md border font-semibold text-sm transition-all',
                 selectedByDays.includes(idx)
-                  ? 'bg-indigo-600 text-white border-indigo-600'
-                  : 'bg-white text-gray-600 border-gray-200 hover:border-indigo-300'
+                  ? 'bg-indigo-600 text-white border-indigo-600 shadow-sm'
+                  : 'bg-white text-gray-600 border-gray-300 hover:border-indigo-400 hover:bg-gray-50'
               )}
             >
               {day}
@@ -152,44 +152,44 @@ export default function RecurrenceModal({
       </div>
 
       <div>
-        <Label className="text-sm font-medium text-gray-700 mb-2 flex items-center gap-1.5">
+        <Label className="text-xs font-semibold text-gray-700 mb-2 flex items-center gap-1.5">
           <Clock className="w-3.5 h-3.5" />
           Interval
         </Label>
-        <div className="flex items-center gap-2">
-          <span className="text-sm text-gray-600">Every</span>
+        <div className="flex items-center gap-2 bg-white border border-gray-300 rounded-md px-3 py-2">
+          <span className="text-sm text-gray-600 font-medium">Every</span>
           <input
             type="number"
             min={1}
             max={52}
             value={intervalWeeks}
             onChange={(e) => setIntervalWeeks(Math.max(1, Number(e.target.value) || 1))}
-            className="w-16 h-9 px-2 text-center text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-indigo-500"
+            className="w-14 h-8 px-2 text-center text-sm font-semibold border border-gray-300 rounded bg-gray-50 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
           />
-          <span className="text-sm text-gray-600">week{intervalWeeks !== 1 ? 's' : ''}</span>
+          <span className="text-sm text-gray-600 font-medium">week{intervalWeeks !== 1 ? 's' : ''}</span>
         </div>
       </div>
     </div>
   );
 
   const renderPage2 = () => (
-    <div className="space-y-4">
+    <div className="space-y-3">
       <div>
-        <Label className="text-sm font-medium text-gray-700 mb-2 block">Mode</Label>
+        <Label className="text-xs font-semibold text-gray-700 mb-2 block">Mode</Label>
         <div className="grid grid-cols-2 gap-2">
           <button
             type="button"
             onClick={() => setSaveAsTemplate(true)}
             className={cn(
-              'relative px-3 py-2 rounded-lg border-2 transition-all text-left text-sm',
+              'relative px-3 py-2.5 rounded-lg border-2 transition-all text-left',
               saveAsTemplate
-                ? 'border-indigo-500 bg-indigo-50'
-                : 'border-gray-200 hover:border-gray-300'
+                ? 'border-indigo-500 bg-indigo-50 shadow-sm'
+                : 'border-gray-300 hover:border-indigo-300 bg-white'
             )}
           >
             <div className="flex items-center gap-2">
               <Sparkles className={cn('w-4 h-4', saveAsTemplate ? 'text-indigo-600' : 'text-gray-400')} />
-              <span className="font-medium">Template</span>
+              <span className="font-semibold text-sm text-gray-900">Template</span>
             </div>
           </button>
 
@@ -197,15 +197,15 @@ export default function RecurrenceModal({
             type="button"
             onClick={() => setSaveAsTemplate(false)}
             className={cn(
-              'relative px-3 py-2 rounded-lg border-2 transition-all text-left text-sm',
+              'relative px-3 py-2.5 rounded-lg border-2 transition-all text-left',
               !saveAsTemplate
-                ? 'border-indigo-500 bg-indigo-50'
-                : 'border-gray-200 hover:border-gray-300'
+                ? 'border-indigo-500 bg-indigo-50 shadow-sm'
+                : 'border-gray-300 hover:border-indigo-300 bg-white'
             )}
           >
             <div className="flex items-center gap-2">
               <Copy className={cn('w-4 h-4', !saveAsTemplate ? 'text-indigo-600' : 'text-gray-400')} />
-              <span className="font-medium">Materialize</span>
+              <span className="font-semibold text-sm text-gray-900">Materialize</span>
             </div>
           </button>
         </div>
@@ -214,43 +214,43 @@ export default function RecurrenceModal({
       {!saveAsTemplate && (
         <div className="grid grid-cols-2 gap-2">
           <div>
-            <Label className="text-xs text-gray-600 mb-1.5 block">Count</Label>
+            <Label className="text-xs font-semibold text-gray-600 mb-1.5 block">Count</Label>
             <input
               type="number"
               min={1}
               placeholder="10"
               value={materializeCount ?? ''}
               onChange={(e) => setMaterializeCount(e.target.value ? Number(e.target.value) : null)}
-              className="w-full h-9 px-2 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-indigo-500"
+              className="w-full h-9 px-3 text-sm font-medium border border-gray-300 rounded-md bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
             />
           </div>
           <div>
-            <Label className="text-xs text-gray-600 mb-1.5 block">Until</Label>
+            <Label className="text-xs font-semibold text-gray-600 mb-1.5 block">Until</Label>
             <input
               type="date"
               value={materializeUntil ?? ''}
               onChange={(e) => setMaterializeUntil(e.target.value || null)}
-              className="w-full h-9 px-2 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-indigo-500"
+              className="w-full h-9 px-3 text-sm font-medium border border-gray-300 rounded-md bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
             />
           </div>
         </div>
       )}
 
       <div>
-        <Label className="text-sm font-medium text-gray-700 mb-2 block">Preview</Label>
-        <div className="border border-gray-200 rounded-lg overflow-hidden bg-gray-50">
-          <div className="max-h-32 overflow-y-auto">
+        <Label className="text-xs font-semibold text-gray-700 mb-2 block">Preview</Label>
+        <div className="border border-gray-300 rounded-lg overflow-hidden bg-gray-50">
+          <div className="max-h-28 overflow-y-auto">
             {previewDates.length === 0 ? (
-              <div className="flex flex-col items-center justify-center py-8 text-center">
-                <Calendar className="w-6 h-6 text-gray-300 mb-1" />
-                <p className="text-xs text-gray-400">No preview</p>
+              <div className="flex flex-col items-center justify-center py-6 text-center">
+                <Calendar className="w-5 h-5 text-gray-300 mb-1" />
+                <p className="text-xs text-gray-400 font-medium">No preview available</p>
               </div>
             ) : (
               <div className="divide-y divide-gray-200">
                 {previewDates.map((d, i) => (
                   <div 
                     key={i} 
-                    className="px-3 py-1.5 bg-white text-xs text-gray-700"
+                    className="px-3 py-2 bg-white text-xs font-medium text-gray-700"
                   >
                     {d.toLocaleDateString('en-US', { 
                       month: 'short', 
@@ -269,8 +269,8 @@ export default function RecurrenceModal({
 
   const renderContent = () => (
     <>
-      <div className="px-5 py-4 border-b">
-        <h2 className="text-lg font-semibold text-gray-900">
+      <div className="px-4 py-3 border-b border-gray-200 bg-white">
+        <h2 className="text-base font-bold text-gray-900">
           {page === 0 ? 'Recurrence Pattern' : 'Generation Settings'}
         </h2>
         <p className="text-xs text-gray-500 mt-0.5">
@@ -278,16 +278,16 @@ export default function RecurrenceModal({
         </p>
       </div>
 
-      <div className="flex-1 overflow-y-auto px-5 py-4">
+      <div className="flex-1 overflow-y-auto px-4 py-3 bg-gray-50">
         {page === 0 ? renderPage1() : renderPage2()}
       </div>
 
-      <div className="px-5 py-3 border-t bg-gray-50 flex justify-between items-center">
+      <div className="px-4 py-3 border-t border-gray-200 bg-white flex justify-between items-center">
         <Button 
           variant="ghost" 
           onClick={handleBackClick}
           size="sm"
-          className="h-9"
+          className="h-9 text-sm font-semibold"
         >
           Back
         </Button>
@@ -298,7 +298,7 @@ export default function RecurrenceModal({
               variant="outline" 
               onClick={onCancel}
               size="sm"
-              className="h-9"
+              className="h-9 text-sm font-semibold"
             >
               Cancel
             </Button>
@@ -307,7 +307,7 @@ export default function RecurrenceModal({
             <Button 
               onClick={() => setPage(1)}
               size="sm"
-              className="h-9 bg-indigo-600 hover:bg-indigo-700"
+              className="h-9 bg-indigo-600 hover:bg-indigo-700 text-sm font-semibold"
             >
               Next <ChevronRight className="w-4 h-4 ml-1" />
             </Button>
@@ -315,7 +315,7 @@ export default function RecurrenceModal({
             <Button 
               onClick={handleSave}
               size="sm"
-              className="h-9 bg-indigo-600 hover:bg-indigo-700"
+              className="h-9 bg-indigo-600 hover:bg-indigo-700 text-sm font-semibold"
             >
               Save
             </Button>
@@ -327,16 +327,17 @@ export default function RecurrenceModal({
 
   if (inline) {
     return (
-      <div className="w-full flex flex-col border border-gray-200 rounded-lg bg-white shadow-sm overflow-hidden max-h-[500px]">
+      <div className="modal-core w-full flex flex-col border border-gray-300 rounded-lg shadow-sm overflow-hidden max-h-[450px]" style={{ backgroundColor: '#ffffff !important' }}>
         {renderContent()}
       </div>
     );
   }
 
   return (
-    <div className="fixed inset-0 flex items-center justify-center z-50 bg-black/50 p-4">
+    <div className="fixed inset-0 flex items-center justify-center z-50 p-4" style={{ backgroundColor: 'rgba(0, 0, 0, 0.5)' }}>
       <div 
-        className="bg-white rounded-lg shadow-xl w-full max-w-md h-auto max-h-[600px] flex flex-col overflow-hidden"
+        className="modal-core rounded-lg shadow-xl w-full max-w-md max-h-[80vh] flex flex-col overflow-hidden"
+        style={{ backgroundColor: '#ffffff !important' }}
         onClick={(e) => e.stopPropagation()}
       >
         {renderContent()}

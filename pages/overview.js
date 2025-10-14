@@ -36,10 +36,8 @@ export default function UniversityOverview() {
   // State-backed data (initially empty; will be populated from backend)
   const [todayClasses, setTodayClasses] = useState([]);
   const [upcomingDeadlines, setUpcomingDeadlines] = useState([]);
-  const [recentGrades, setRecentGrades] = useState([]);
   const [isLoadingClasses, setIsLoadingClasses] = useState(true);
   const [isLoadingDeadlines, setIsLoadingDeadlines] = useState(true);
-  const [isLoadingGrades, setIsLoadingGrades] = useState(true);
 
   // Auxiliary data caches
   const [courses, setCourses] = useState([]);
@@ -305,22 +303,7 @@ export default function UniversityOverview() {
           }
         } finally { setIsLoadingDeadlines(false); }
 
-        // GRADES
-        setIsLoadingGrades(true);
-        try {
-          const gradesPayload = await safeFetchJson('/api/grades');
-          if (mounted && gradesPayload && Array.isArray(gradesPayload.data)) {
-            const recent = gradesPayload.data.slice(0,6).map(g => ({
-              id: g.id,
-              course: g.courseCode || g.course || (g.courseId ? String(g.courseId) : 'TBD'),
-              assignment: g.title || g.name || g.item || 'Assessment',
-              grade: g.score || g.value || 0,
-              maxGrade: g.maxScore || 100,
-              date: g.date ? new Date(g.date).toLocaleDateString(undefined, { month: 'short', day: 'numeric' }) : ''
-            }));
-            if (mounted) setRecentGrades(recent);
-          }
-        } finally { setIsLoadingGrades(false); }
+        // GRADES: intentionally removed from overview to reduce clutter
 
         // QUICK STATS
         setIsLoadingQuickStats(true);
@@ -368,21 +351,31 @@ export default function UniversityOverview() {
 
           const gpa = avgPercentage !== null ? Math.round(((avgPercentage / 100) * 4) * 100) / 100 : null;
 
-          // Attendance & study hours (best-effort from first course)
+          // Attendance & study hours (aggregate across all courses)
           let attendanceRate = null;
-          if (courseList && courseList.length) {
-            const firstCourse = courseList[0];
-            if (firstCourse && firstCourse.id) {
-              try {
-                const att = await safeFetchJson(`/api/attendance?courseId=${firstCourse.id}`);
-                if (att && att.sessions && Array.isArray(att.sessions) && att.sessions.length) {
-                  const total = att.sessions.length;
-                  const present = att.sessions.filter(s => String(s.status).toUpperCase() === 'PRESENT').length;
-                  attendanceRate = Math.round((present / total) * 100);
-                  try { setStudyHoursLogged(total); } catch (e) { setStudyHoursLogged(0); }
+          try {
+            if (courseList && courseList.length) {
+              // fetch attendance for each course in parallel (best-effort), but ignore courses without id
+              const courseIds = courseList.map(c => c && c.id).filter(Boolean);
+              if (courseIds.length) {
+                const promises = courseIds.map(id => safeFetchJson(`/api/attendance?courseId=${id}`));
+                const results = await Promise.all(promises);
+                let totalSessions = 0;
+                let totalPresent = 0;
+                for (const att of results) {
+                  if (att && Array.isArray(att.sessions) && att.sessions.length) {
+                    totalSessions += att.sessions.length;
+                    totalPresent += att.sessions.filter(s => String(s.status).toUpperCase() === 'PRESENT').length;
+                  }
                 }
-              } catch (e) { /* ignore */ }
+                if (totalSessions > 0) {
+                  attendanceRate = Math.round((totalPresent / totalSessions) * 100);
+                  try { setStudyHoursLogged(totalSessions); } catch (e) { setStudyHoursLogged(0); }
+                }
+              }
             }
+          } catch (e) {
+            // ignore attendance errors
           }
 
           if (mounted) setQuickStats({ gpa, credits: creditsSum, dueThisWeek: dueCount, attendanceRate });
@@ -596,32 +589,7 @@ export default function UniversityOverview() {
               )}
             </div>
 
-            {/* Recent Grades */}
-            <div className="bg-white dark:bg-gray-800 rounded-xl p-6 shadow-sm border border-gray-100 dark:border-gray-700">
-              <div className="flex items-center justify-between mb-6">
-                <h3 className="text-xl font-bold text-gray-900">Recent Grades</h3>
-                <button className="text-purple-600 font-medium text-sm hover:text-purple-700">View All Grades</button>
-              </div>
-              
-                <div className="space-y-3">
-                {recentGrades.map((grade) => (
-                  <div key={grade.id} className="flex items-center justify-between p-4 border border-gray-200 rounded-lg hover:border-purple-300 transition-colors">
-                    <div>
-                      <div className="flex items-center gap-2 mb-1">
-                        <span className="font-semibold text-purple-600">{grade.course}</span>
-                        <span className="text-gray-400">•</span>
-                        <span className="text-gray-700">{grade.assignment}</span>
-                      </div>
-                      <p className="text-sm text-gray-500">{grade.date}</p>
-                    </div>
-                    <div className="text-right">
-                      <div className="text-2xl font-bold text-gray-900">{grade.grade}</div>
-                      <div className="text-sm text-gray-500">/ {grade.maxGrade}</div>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </div>
+            {/* Recent Grades removed per request */}
           </div>
 
           {/* Right Column - Quick Actions & This Week */}

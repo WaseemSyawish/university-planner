@@ -14,6 +14,7 @@ import {
   ChevronRight,
   CheckSquare
 } from 'lucide-react';
+import { User } from 'lucide-react';
 import Avatar from '../components/Avatar';
 import { Settings, LogOut } from 'lucide-react';
 import { signOut } from 'next-auth/react';
@@ -271,7 +272,7 @@ function CollapsedProfileButton({ profile }) {
           ref={popRef} 
           role="menu" 
           aria-label="User menu" 
-          className="absolute bottom-12 right-0 bg-white dark:bg-gray-800 rounded-lg shadow-lg border border-gray-200 dark:border-gray-700 overflow-hidden"
+          className="absolute bottom-12 left-0 transform translate-x-full bg-white dark:bg-gray-800 rounded-lg shadow-lg border border-gray-200 dark:border-gray-700 overflow-hidden"
           style={{ minWidth: 200, zIndex: 50 }}
         >
           <div className="p-3 border-b border-gray-200 dark:border-gray-700">

@@ -142,7 +142,7 @@ export default function SelectDate({
 
   return (
     <div className="space-y-2">
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+  <div className="grid grid-cols-1 md:grid-cols-2 gap-2 pb-4">
         {/* Start Date Picker */}
         <div className="grid gap-1">
           <Label htmlFor="startDate" className="text-sm">Start Date</Label>
@@ -156,7 +156,7 @@ export default function SelectDate({
                   !startDate && "text-muted-foreground"
                 )}
               >
-                <CalendarIcon className="mr-2 h-4 w-4" />
+                <CalendarIcon className="mr-2 h-4 w-4 text-gray-500 dark:text-gray-300" />
                 {startDate ? format(startDate, "PPP") : <span>Pick a date</span>}
               </Button>
             </PopoverTrigger>
@@ -194,7 +194,7 @@ export default function SelectDate({
                   !endDate && "text-muted-foreground"
                 )}
               >
-                <CalendarIcon className="mr-2 h-4 w-4" />
+                <CalendarIcon className="mr-2 h-4 w-4 text-gray-500 dark:text-gray-300" />
                 {endDate ? format(endDate, "PPP") : <span>Pick a date</span>}
               </Button>
             </PopoverTrigger>
@@ -221,9 +221,9 @@ export default function SelectDate({
         </div>
       </div>
 
-      <div className="flex flex-col gap-2">
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
         {/* Start Time (freeform) */}
-        <div className="grid gap-1">
+        <div className="grid gap-2 py-1">
           <Label className="text-sm">Start Time</Label>
           <div className="flex gap-2 items-center">
             <input
@@ -248,7 +248,7 @@ export default function SelectDate({
         </div>
 
         {/* End Time (freeform) */}
-        <div className="grid gap-1">
+  <div className="grid gap-2 py-1">
           <Label className="text-sm">End Time</Label>
           <div className="flex gap-2 items-center">
             <input

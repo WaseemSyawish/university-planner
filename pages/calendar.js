@@ -26,7 +26,7 @@ try {
       type: e.type || 'event',
       location: e.location || '',
       description: e.description || '',
-  color: (e.type === 'class' || e.type === 'timetable') ? 'bg-primary' : (e.type === 'deadline' ? 'bg-error' : 'bg-secondary')
+  color: (e.type === 'class' || e.type === 'timetable' || e.type === 'lecture') ? 'bg-primary' : (e.type === 'deadline' ? 'bg-error' : 'bg-secondary')
     }));
   }
 } catch (err) {
@@ -166,7 +166,7 @@ export default function CalendarPage() {
           type: e.type || 'event',
           location: e.location || '',
           description: e.description || '',
-          color: e.type === 'class' ? 'bg-primary' : (e.type === 'deadline' ? 'bg-error' : 'bg-secondary')
+          color: (e.type === 'class' || e.type === 'lecture') ? 'bg-primary' : (e.type === 'deadline' ? 'bg-error' : 'bg-secondary')
         }));
         // preserve any client-only temporary or timetable entries already in memory
         setEvents(prev => {
@@ -271,15 +271,32 @@ export default function CalendarPage() {
           }
         }
 
-        // Merge into events state, dedupe by id
+        // Merge into events state, dedupe by id. If an incoming timetable occurrence
+        // matches an existing server event by title/date/startTime, update that
+        // server event to be a lecture (so calendar and timetable stay in sync).
         setEvents(prev => {
           const existingIds = new Set(prev.map(e => String(e.id)));
           const merged = [...prev];
           occurrences.forEach(o => {
+            // If an event with the same canonical id already exists, skip adding
             if (existingIds.has(String(o.id))) return;
-            // also avoid exact title/date/time duplicates
+
+            // Look for an existing server event that matches by title, date and startTime
+            const clashIndex = merged.findIndex(p => p.title === o.title && p.date === o.date && (p.startTime||'') === (o.startTime||''));
+            if (clashIndex !== -1) {
+              // Promote the existing event to a lecture/timetable entry so visuals match
+              merged[clashIndex] = {
+                ...merged[clashIndex],
+                type: 'lecture',
+                color: o.color || 'bg-primary'
+              };
+              return;
+            }
+
+            // also avoid exact title/date/time duplicates against the original prev array
             const clash = prev.find(p => p.title === o.title && p.date === o.date && (p.startTime||'') === (o.startTime||''));
             if (clash) return;
+
             merged.push(o);
           });
           return merged;
@@ -430,7 +447,7 @@ export default function CalendarPage() {
             if (r.ok) {
               const pl = await r.json();
               const list = Array.isArray(pl?.events) ? pl.events : (Array.isArray(pl) ? pl : []);
-              const normalized = list.map(e => ({ id: String(e.id), title: e.title || body.title, date: e.date || body.date, startTime: e.time || '', endTime: e.endTime || '', type: e.type || body.type || 'event', location: e.location || '', description: e.description || '', color: e.color || ((e.type === 'class' || e.type === 'timetable') ? 'bg-primary' : (e.type === 'deadline' ? 'bg-error' : 'bg-secondary')) }));
+              const normalized = list.map(e => ({ id: String(e.id), title: e.title || body.title, date: e.date || body.date, startTime: e.time || '', endTime: e.endTime || '', type: e.type || body.type || 'event', location: e.location || '', description: e.description || '', color: e.color || ((e.type === 'class' || e.type === 'timetable' || e.type === 'lecture') ? 'bg-primary' : (e.type === 'deadline' ? 'bg-error' : 'bg-secondary')) }));
               // preserve temp items
               const preserved = (events || []).filter(ev => String(ev.id).startsWith('tmp-'));
               setEvents([...normalized, ...preserved]);
@@ -731,12 +748,21 @@ export default function CalendarPage() {
           </div>
 
           <aside className="w-96 mt-4 md:mt-0 md:ml-4 flex-shrink-0">
-            <div className="cozy backdrop-blur-xl border border-slate-200/60 rounded-xl p-4 shadow-lg hover:shadow-xl transition-shadow duration-300 max-h-[calc(100vh-120px)] overflow-auto">
+            {/* hide scrollbar visually while keeping content scrollable */}
+            <div className="cozy backdrop-blur-xl border border-slate-200/60 rounded-xl p-4 shadow-lg hover:shadow-xl transition-shadow duration-300 max-h-[calc(100vh-120px)] overflow-auto" style={{ scrollbarWidth: 'none', msOverflowStyle: 'none' }}>
+              <style>{`/* hide webkit scrollbars for this widget only */
+                .cozy::-webkit-scrollbar { display: none; }
+                /* Selected-day holiday card uses CSS variables to adapt light/dark tones */
+                .selected-holiday-card { background: var(--holiday-bg-light, rgba(245,158,11,0.12)); border: 2px solid var(--holiday-border-light, rgba(245,158,11,0.22)); color: var(--holiday-text-light, #92400e); }
+                @media (prefers-color-scheme: dark) {
+                  .selected-holiday-card { background: var(--holiday-bg-dark, rgba(245,158,11,0.18)); border: 2px solid var(--holiday-border-dark, rgba(245,158,11,0.36)); color: var(--holiday-text-dark, #fff); }
+                }
+              `}</style>
               <div className="mb-4">
                 <div className="text-xs font-bold text-slate-700 dark:text-slate-300 mb-2">Legend</div>
                 <div className="flex flex-wrap gap-2 items-center">
                   {[
-                    {color:'bg-primary',label:'Class'},
+                    {color:'bg-primary',label:'Lecture'},
                     {color:'bg-error',label:'Deadline'},
                     {color:'bg-success',label:'Event'},
                     {color:'bg-secondary',label:'Assignment'},
@@ -750,7 +776,7 @@ export default function CalendarPage() {
                 </div>
               </div>
               <div className="mb-4">
-                  <div className="p-4 cozy rounded-lg border border-slate-100 shadow-sm">
+                  <div className="p-4 cozy rounded-lg border border-slate-100 shadow-sm overflow-hidden">
                   <div className="text-sm text-slate-700 dark:text-slate-300">Selected Day</div>
                   <div className="text-lg font-bold text-slate-900 dark:text-slate-100 mt-1">
                     {selectedDate ? (() => { const [y,m,d] = selectedDate.split('-'); return new Date(Number(y), Number(m)-1, Number(d)).toLocaleDateString(undefined, { weekday: 'long', year: 'numeric', month: 'short', day: 'numeric' }); })() : 'Select a date'}
@@ -768,13 +794,43 @@ export default function CalendarPage() {
                     const hol = isHoliday(selectedDate);
                     return (
                       <div className="space-y-3">
-                        {hol && (
-                          <div className="p-3 bg-gradient-to-br from-amber-50 to-yellow-50 border-2 border-amber-200 rounded-lg shadow-sm">
-                            <div className="flex items-center gap-3">
-                              <div className="text-sm font-semibold text-amber-800">{hol.localName || hol.name || 'Holiday'}</div>
+                        {hol && (() => {
+                          // derive a subtle background from the holiday color class (e.g. 'bg-warning')
+                          const map = { primary: '#8B5CF6', secondary: '#64748B', accent: '#06B6D4', info: '#3B82F6', success: '#10B981', warning: '#F59E0B', error: '#EF4444', neutral: '#6B7280' };
+                          const cls = (hol && hol.color) ? String(hol.color) : 'bg-warning';
+                          const key = cls.replace(/^bg-/, '');
+                          const hex = map[key] || '#F59E0B';
+                          const hexToRgba = (h, a) => {
+                            const hx = String(h).replace('#','');
+                            const r = parseInt(hx.slice(0,2),16);
+                            const g = parseInt(hx.slice(2,4),16);
+                            const b = parseInt(hx.slice(4,6),16);
+                            return `rgba(${r}, ${g}, ${b}, ${a})`;
+                          };
+                          const bg = hexToRgba(hex, 0.12);
+                          const border = hexToRgba(hex, 0.22);
+                          // readable text: dark for light yellows, otherwise pick white for dark colors
+                          const textColor = (key === 'warning' || key === 'accent' || key === 'info') ? 'text-amber-800' : 'text-slate-900';
+                          // Map color keys to explicit Tailwind classes so border matches legend exactly
+                          const colorMap = {
+                            warning: { bgLight: 'bg-warning/25', bgDark: 'dark:bg-warning/40', border: 'border-warning', text: 'text-amber-800 dark:text-amber-200' },
+                            primary: { bgLight: 'bg-primary/25', bgDark: 'dark:bg-primary/40', border: 'border-primary', text: 'text-white' },
+                            secondary: { bgLight: 'bg-secondary/20', bgDark: 'dark:bg-secondary/30', border: 'border-secondary', text: 'text-slate-900 dark:text-white' },
+                            info: { bgLight: 'bg-info/25', bgDark: 'dark:bg-info/40', border: 'border-info', text: 'text-white' },
+                            success: { bgLight: 'bg-success/25', bgDark: 'dark:bg-success/40', border: 'border-success', text: 'text-white' },
+                            error: { bgLight: 'bg-error/25', bgDark: 'dark:bg-error/40', border: 'border-error', text: 'text-white' },
+                            neutral: { bgLight: 'bg-neutral/20', bgDark: 'dark:bg-neutral/30', border: 'border-neutral', text: 'text-slate-900 dark:text-white' },
+                            accent: { bgLight: 'bg-accent/25', bgDark: 'dark:bg-accent/40', border: 'border-accent', text: 'text-white' }
+                          };
+                          const cm = colorMap[key] || colorMap.warning;
+                          return (
+                            <div className={`p-3 rounded-lg shadow-sm ${cm.bgLight} ${cm.bgDark} ${cm.border} border-2`}>
+                              <div className="flex items-center gap-3">
+                                <div className={`text-sm font-semibold ${cm.text}`}>{hol.localName || hol.name || 'Holiday'}</div>
+                              </div>
                             </div>
-                          </div>
-                        )}
+                          );
+                        })()}
                         {evs.length === 0 && !hol ? (
                             <div className="text-center py-10 text-slate-700 dark:text-slate-300">
                             <Calendar className="w-10 h-10 mx-auto mb-3 text-slate-300" />
