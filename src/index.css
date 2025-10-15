@@ -4870,3 +4870,52 @@ html.dark .event-card-list-item button[aria-label="Delete event"]:hover {
   border-color: #b91c1c !important;
   color: #fff !important;
 }
+
+/* ============================================
+   CALENDAR PAGE FIXES
+   ============================================ */
+
+/* 1. FIX TODAY'S DATE HIGHLIGHT - More visible in dark mode */
+.calendar-root
+  [role="gridcell"]
+  .text-white.bg-gradient-to-br.from-purple-600.to-purple-700 {
+  /* Light mode: vibrant purple gradient */
+  background: linear-gradient(to bottom right, #9333ea, #7c3aed) !important;
+  color: white !important;
+  font-weight: 700 !important;
+}
+
+/* Dark mode: brighter, glowing purple */
+:global(html.dark)
+  .calendar-root
+  [role="gridcell"]
+  .text-white.bg-gradient-to-br {
+  background: linear-gradient(to bottom right, #a855f7, #9333ea) !important;
+  color: white !important;
+  box-shadow: 0 4px 14px rgba(168, 85, 247, 0.35) !important;
+  font-weight: 700 !important;
+}
+
+/* 2. FIX HEADER CALENDAR ICON - Match other pages with gradient */
+.calendar-root header .w-11.h-11.rounded-xl {
+  background: linear-gradient(to bottom right, #9333ea, #7c3aed) !important;
+  box-shadow: 0 4px 12px rgba(147, 51, 234, 0.25) !important;
+}
+
+/* Dark mode header icon */
+:global(html.dark) .calendar-root header .w-11.h-11.rounded-xl {
+  background: linear-gradient(to bottom right, #a855f7, #9333ea) !important;
+  box-shadow: 0 4px 14px rgba(168, 85, 247, 0.4) !important;
+}
+
+/* Ensure icon SVG stays white in both modes */
+.calendar-root header .w-11.h-11.rounded-xl svg {
+  color: white !important;
+  stroke: white !important;
+  fill: none !important;
+}
+
+/* 3. FIX DATE NUMBER CONTRAST IN DARK MODE */
+:global(html.dark) .calendar-root [role="gridcell"] .text-slate-800 {
+  color: rgba(255, 255, 255, 0.95) !important;
+}
