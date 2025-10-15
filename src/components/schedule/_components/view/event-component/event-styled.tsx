@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useState, useRef } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { useModal } from "@/providers/modal-context";
@@ -11,7 +11,6 @@ import { useScheduler } from "@/providers/schedular-provider";
 import { cn } from "@/lib/utils";
 import CustomModal from "@/components/ui/custom-modal";
 
-// Function to format time only
 const formatTime = (date: Date) => {
   return date.toLocaleString("en-US", {
     hour: "numeric",
@@ -20,94 +19,51 @@ const formatTime = (date: Date) => {
   });
 };
 
-// Refined color palette matching the screenshots exactly
 const colorKeyToBg = (key, isDark = false) => {
   if (isDark) {
-    // Darker, more saturated colors for dark mode
     switch (key) {
       case 'blue':
-        return { bg: '#1e3a5f', text: '#93c5fd', border: '#2563eb' };
+        return { bg: '#1e3a5f', border: '#2563eb', text: '#93c5fd' };
       case 'red':
-        return { bg: '#4c1d24', text: '#fca5a5', border: '#dc2626' };
+        return { bg: '#4c1d24', border: '#dc2626', text: '#fca5a5' };
       case 'green':
-        return { bg: '#14532d', text: '#86efac', border: '#16a34a' };
+        return { bg: '#14532d', border: '#16a34a', text: '#86efac' };
       case 'yellow':
-        return { bg: '#451a03', text: '#fcd34d', border: '#d97706' };
+        return { bg: '#451a03', border: '#d97706', text: '#fcd34d' };
+      case 'purple':
+        return { bg: '#581c87', border: '#9333ea', text: '#d8b4fe' };
       default:
         return null;
     }
   } else {
-    // Light mode colors
     switch (key) {
       case 'blue':
-        return { bg: '#e0f2fe', text: '#0c4a6e', border: '#bae6fd' };
+        return { bg: '#dbeafe', border: '#3b82f6', text: '#1e40af' };
       case 'red':
-        return { bg: '#ffe4e6', text: '#881337', border: '#fecdd3' };
+        return { bg: '#fee2e2', border: '#ef4444', text: '#991b1b' };
       case 'green':
-        return { bg: '#d1fae5', text: '#064e3b', border: '#a7f3d0' };
+        return { bg: '#dcfce7', border: '#22c55e', text: '#166534' };
       case 'yellow':
-        return { bg: '#fef3c7', text: '#78350f', border: '#fde68a' };
+        return { bg: '#fef3c7', border: '#f59e0b', text: '#92400e' };
+      case 'purple':
+        return { bg: '#f3e8ff', border: '#a855f7', text: '#6b21a8' };
       default:
         return null;
     }
   }
 };
 
-// Helpers: convert hex to rgb, compute luminance, and pick readable text color
 const hexToRgb = (hex: string) => {
   if (!hex || typeof hex !== 'string') return null;
   const cleaned = hex.replace('#', '');
-  if (cleaned.length === 8) {
-    return {
-      r: parseInt(cleaned.slice(0, 2), 16),
-      g: parseInt(cleaned.slice(2, 4), 16),
-      b: parseInt(cleaned.slice(4, 6), 16),
-      a: parseInt(cleaned.slice(6, 8), 16) / 255,
-    };
-  }
   if (cleaned.length === 6) {
     return {
       r: parseInt(cleaned.slice(0, 2), 16),
       g: parseInt(cleaned.slice(2, 4), 16),
       b: parseInt(cleaned.slice(4, 6), 16),
-      a: 1,
     };
   }
   return null;
-};
-
-const luminance = (r: number, g: number, b: number) => {
-  const srgb = [r, g, b].map((v) => {
-    const s = v / 255;
-    return s <= 0.03928 ? s / 12.92 : Math.pow((s + 0.055) / 1.055, 2.4);
-  });
-  return 0.2126 * srgb[0] + 0.7152 * srgb[1] + 0.0722 * srgb[2];
-};
-
-const getReadableTextColor = (bg: string | undefined, isDark: boolean) => {
-  try {
-    if (!bg) return isDark ? '#e2e8f0' : '#0c4a6e';
-    
-    const maybeHex = typeof bg === 'string' && bg.startsWith('#') ? 
-      (bg.length >= 7 ? ('#' + bg.replace('#', '').slice(0, 6)) : bg) : null;
-    const bgRgb = hexToRgb(maybeHex || bg);
-    
-    if (!bgRgb) return isDark ? '#e2e8f0' : '#0c4a6e';
-    
-    const bgLum = luminance(bgRgb.r, bgRgb.g, bgRgb.b);
-    
-    // In dark mode, use lighter text
-    // In light mode, use darker text
-    if (isDark) {
-      // For dark mode backgrounds, use light text
-      return bgLum < 0.3 ? '#f1f5f9' : '#0f172a';
-    } else {
-      // For light mode backgrounds, use dark text
-      return bgLum > 0.5 ? '#0f172a' : '#f8fafc';
-    }
-  } catch (e) {
-    return isDark ? '#e2e8f0' : '#0c4a6e';
-  }
 };
 
 interface EventStyledProps extends Event {
@@ -129,9 +85,8 @@ export default function EventStyled({
 }) {
   const { setOpen } = useModal();
   const { handlers } = useScheduler();
-  const [isHovered, setIsHovered] = useState(false);
+  const deleteBtnRef = useRef<HTMLButtonElement>(null);
 
-  // Handler function
   function handleEditEvent(event: Event) {
     setOpen(
       <CustomModal title="Edit Event">
@@ -149,10 +104,7 @@ export default function EventStyled({
     );
   }
 
-  // Check if color is hex
   const isHex = (s) => typeof s === 'string' && /^#([0-9A-F]{3}){1,2}$/i.test(s);
-
-  // Resolve color value
   const resolvedColorValue = (event?.meta?.color) || event?.color;
 
   const [isDark, setIsDark] = useState(false);
@@ -160,54 +112,89 @@ export default function EventStyled({
   useEffect(() => {
     try {
       const mq = typeof window !== 'undefined' && window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)');
-      const check = () => setIsDark(typeof document !== 'undefined' && (document.documentElement.classList.contains('dark') || (mq && mq.matches)));
-      check();
-      if (mq && mq.addEventListener) mq.addEventListener('change', check);
-      else if (mq && mq.addListener) mq.addListener(check as any);
-      return () => { if (mq && mq.removeEventListener) mq.removeEventListener('change', check); else if (mq && mq.removeListener) mq.removeListener(check as any); };
+      const prefersDark = mq && mq.matches;
+      const htmlHasDark = typeof document !== 'undefined' && document.documentElement.classList.contains('dark');
+      setIsDark(!!(htmlHasDark || prefersDark));
     } catch (e) {}
   }, []);
 
-  // Get color scheme based on dark mode
+  // Force delete button styles with !important via CSSOM
+  useEffect(() => {
+    const btn = deleteBtnRef.current;
+    if (!btn) return;
+    
+    const svg = btn.querySelector('svg');
+    
+    // Set styles with !important priority - theme-appropriate design
+    if (isDark) {
+      btn.style.setProperty('background-color', 'rgba(15, 23, 42, 0.9)', 'important');
+      btn.style.setProperty('border', '1px solid rgba(71, 85, 105, 0.6)', 'important');
+    } else {
+      btn.style.setProperty('background-color', 'rgba(255, 255, 255, 0.95)', 'important');
+      btn.style.setProperty('border', '1px solid rgba(203, 213, 225, 0.8)', 'important');
+    }
+    
+    btn.style.setProperty('width', '18px', 'important');
+    btn.style.setProperty('height', '18px', 'important');
+    btn.style.setProperty('border-radius', '3px', 'important');
+    btn.style.setProperty('padding', '0', 'important');
+    btn.style.setProperty('cursor', 'pointer', 'important');
+    btn.style.setProperty('display', 'flex', 'important');
+    btn.style.setProperty('align-items', 'center', 'important');
+    btn.style.setProperty('justify-content', 'center', 'important');
+    btn.style.setProperty('backdrop-filter', 'blur(4px)', 'important');
+    
+    if (svg) {
+      if (isDark) {
+        svg.style.setProperty('stroke', '#cbd5e1', 'important');
+      } else {
+        svg.style.setProperty('stroke', '#64748b', 'important');
+      }
+      svg.style.setProperty('fill', 'none', 'important');
+    }
+  }, [isDark]);
+
   const getColorScheme = () => {
     if (resolvedColorValue) {
       const raw = String(resolvedColorValue);
       if (isHex(raw)) {
-        // For hex colors in dark mode, use darker backgrounds
-        if (isDark) {
-          return { 
-            bg: raw + '30', // more opacity for dark mode
-            text: raw,
-            border: raw + '60'
-          };
-        } else {
-          return { 
-            bg: raw + '20',
-            text: raw,
-            border: raw + '40'
-          };
+        const rgb = hexToRgb(raw);
+        if (rgb) {
+          if (isDark) {
+            // Dark mode: use darker, muted backgrounds
+            const darkBg = `rgba(${Math.floor(rgb.r * 0.25)}, ${Math.floor(rgb.g * 0.25)}, ${Math.floor(rgb.b * 0.25)}, 0.9)`;
+            const lightText = `rgba(${Math.min(255, rgb.r + 100)}, ${Math.min(255, rgb.g + 100)}, ${Math.min(255, rgb.b + 100)}, 1)`;
+            return { 
+              bg: darkBg,
+              border: raw,
+              text: lightText
+            };
+          } else {
+            // Light mode: use lighter, pastel backgrounds
+            const lightBg = `rgba(${rgb.r}, ${rgb.g}, ${rgb.b}, 0.15)`;
+            const darkText = `rgba(${Math.floor(rgb.r * 0.6)}, ${Math.floor(rgb.g * 0.6)}, ${Math.floor(rgb.b * 0.6)}, 1)`;
+            return { 
+              bg: lightBg,
+              border: raw,
+              text: darkText
+            };
+          }
         }
       } else {
         const mapped = colorKeyToBg(raw, isDark);
         if (mapped) return mapped;
       }
     }
-    // Default colors based on mode
+    // Default colors
     if (isDark) {
-      return { bg: '#1e3a5f', text: '#93c5fd', border: '#2563eb' };
+      return { bg: '#1e293b', border: '#475569', text: '#e2e8f0' };
     } else {
-      return { bg: '#e0f2fe', text: '#0c4a6e', border: '#bae6fd' };
+      return { bg: '#f8fafc', border: '#cbd5e1', text: '#1e293b' };
     }
   };
 
   const colors = getColorScheme();
-  const isCompact = !!event?.compact;
   const shouldSpanFull = !event?.collapsed;
-  
-  const resolvedBg = (typeof colors?.bg === 'string' && colors.bg) ? 
-    colors.bg : (isDark ? '#1e293b' : '#ffffff');
-  
-  const finalTextColor = getReadableTextColor(resolvedBg, isDark);
 
   return (
     <div
@@ -218,67 +205,45 @@ export default function EventStyled({
         minHeight: 0,
         padding: '2px'
       }}
-      onMouseEnter={() => setIsHovered(true)}
-      onMouseLeave={() => setIsHovered(false)}
     >
-      {/* Delete button - appears on hover */}
+      {/* Delete Button - With forced styles via CSSOM */}
       <button
-          onClick={(e: React.MouseEvent<HTMLButtonElement>) => {
-            e.stopPropagation();
-            handlers.handleDeleteEvent(event?.id);
-            onDelete?.(event?.id);
-          }}
-          aria-label="Delete event"
-          className="absolute"
-          style={{
-            right: '8px',
-            top: '8px',
-            width: '30px',
-            height: '30px',
-            aspectRatio: '1',
-            padding: 0,
-            transition: 'transform 0.12s ease, background 0.12s ease, color 0.12s ease, opacity 0.12s ease',
-            borderRadius: '50%',
-            backgroundColor: isDark ? 'rgba(255,255,255,0.04)' : 'rgba(255,255,255,0.95)',
-            background: 'none',
-            backgroundImage: 'none',
-            border: isDark ? '1px solid rgba(255,255,255,0.06)' : '1px solid rgba(2,6,23,0.06)',
-            cursor: 'pointer',
-            display: 'inline-flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            boxShadow: isDark ? '0 2px 8px rgba(2,6,23,0.6)' : '0 2px 8px rgba(2,6,23,0.06)',
-            overflow: 'visible',
-            zIndex: 9999,
-            pointerEvents: isHovered ? 'auto' : 'none',
-            opacity: isHovered ? 1 : 0,
-            color: isDark ? '#f1f5f9' : '#475569' // use currentColor for the SVG
-          }}
-          onMouseEnter={(e) => {
-            e.currentTarget.style.backgroundImage = 'none';
-            e.currentTarget.style.background = isDark ? 'rgba(239,68,68,1)' : 'rgba(220,38,38,1)';
-            e.currentTarget.style.backgroundColor = isDark ? 'rgba(239,68,68,1)' : 'rgba(220,38,38,1)';
-            e.currentTarget.style.color = '#fff';
-            e.currentTarget.style.transform = 'scale(1.05)';
-            e.currentTarget.style.boxShadow = isDark ? '0 6px 18px rgba(2,6,23,0.6)' : '0 6px 18px rgba(2,6,23,0.12)';
-          }}
-          onMouseLeave={(e) => {
-            e.currentTarget.style.backgroundImage = 'none';
-            e.currentTarget.style.background = 'none';
-            e.currentTarget.style.backgroundColor = isDark ? 'rgba(255,255,255,0.04)' : 'rgba(255,255,255,0.95)';
-            e.currentTarget.style.color = isDark ? '#f1f5f9' : '#475569';
-            e.currentTarget.style.transform = 'scale(1)';
-            e.currentTarget.style.boxShadow = isDark ? '0 2px 8px rgba(2,6,23,0.6)' : '0 2px 8px rgba(2,6,23,0.06)';
-          }}
+        ref={deleteBtnRef}
+        onClick={(e: React.MouseEvent<HTMLButtonElement>) => {
+          e.stopPropagation();
+          handlers.handleDeleteEvent(event?.id);
+          onDelete?.(event?.id);
+        }}
+        aria-label="Delete event"
+        className="absolute z-[100] event-delete-btn opacity-0 group-hover:opacity-100 transition-all duration-200"
+        style={{
+          right: '5px',
+          top: '5px',
+        }}
+        onMouseEnter={(e) => {
+          e.currentTarget.style.setProperty('background-color', '#dc2626', 'important');
+          e.currentTarget.style.setProperty('transform', 'scale(1.1)', 'important');
+          e.currentTarget.style.setProperty('box-shadow', '0 2px 6px rgba(0, 0, 0, 0.4)', 'important');
+        }}
+        onMouseLeave={(e) => {
+          e.currentTarget.style.setProperty('background-color', '#ef4444', 'important');
+          e.currentTarget.style.setProperty('transform', 'scale(1)', 'important');
+          e.currentTarget.style.setProperty('box-shadow', '0 1px 3px rgba(0, 0, 0, 0.3)', 'important');
+        }}
+      >
+        <svg
+          width="10"
+          height="10"
+          viewBox="0 0 24 24"
+          fill="none"
+          strokeWidth={2.5}
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          style={{ display: 'block', pointerEvents: 'none' }}
         >
-          <TrashIcon 
-            size={16}
-            className=""
-            stroke="currentColor"
-            {...{ strokeWidth: 1.8 }}
-            style={{ display: 'block', opacity: 1 }}
-          />
-        </button>
+          <path d="M18 6L6 18M6 6l12 12" />
+        </svg>
+      </button>
 
       {event.CustomEventComponent ? (
         <div
@@ -293,7 +258,7 @@ export default function EventStyled({
               variant: event?.variant,
             });
           }}
-          className="w-full h-full"
+          className="w-full h-full cursor-pointer"
         >
           <event.CustomEventComponent {...event} />
         </div>
@@ -310,110 +275,58 @@ export default function EventStyled({
               variant: event?.variant,
             });
           }}
-
+          className="w-full h-full event-tile"
           style={{
             width: '100%',
             height: '100%',
-            backgroundColor: resolvedBg,
+            backgroundColor: colors.bg,
             borderRadius: '6px',
-            border: `1px solid ${colors?.border || (isDark ? 'rgba(255,255,255,0.1)' : 'rgba(0,0,0,0.06)')}`,
-            padding: event?.minmized ? '8px 12px' : '10px 12px',
+            borderLeft: `4px solid ${colors.border}`,
+            borderTop: `1px solid ${isDark ? 'rgba(71, 85, 105, 0.3)' : 'rgba(203, 213, 225, 0.5)'}`,
+            borderRight: `1px solid ${isDark ? 'rgba(71, 85, 105, 0.3)' : 'rgba(203, 213, 225, 0.5)'}`,
+            borderBottom: `1px solid ${isDark ? 'rgba(71, 85, 105, 0.3)' : 'rgba(203, 213, 225, 0.5)'}`,
+            padding: event?.minmized ? '8px 10px' : '10px 12px',
             display: 'flex',
             flexDirection: 'column',
+            gap: '4px',
             minHeight: 0,
-            transition: 'all 0.15s ease',
-            boxShadow: isDark ? '0 1px 3px rgba(0,0,0,0.6)' : '0 1px 3px rgba(0,0,0,0.05)',
-            color: finalTextColor
-          }}
-          onMouseEnter={(e) => {
-            e.currentTarget.style.transform = 'translateY(-1px)';
-            e.currentTarget.style.boxShadow = isDark ? '0 4px 12px rgba(0,0,0,0.4)' : '0 4px 12px rgba(0,0,0,0.08)';
-          }}
-          onMouseLeave={(e) => {
-            e.currentTarget.style.transform = 'translateY(0)';
-            e.currentTarget.style.boxShadow = isDark ? '0 1px 3px rgba(0,0,0,0.6)' : '0 1px 3px rgba(0,0,0,0.05)';
+            transition: 'transform 150ms linear, opacity 150ms linear',
+            boxShadow: 'none',
           }}
         >
-          {event?.minmized ? (
+          <div style={{ 
+            fontWeight: 600, 
+            fontSize: '13px',
+            lineHeight: '1.3',
+            color: colors.text,
+            marginBottom: '2px',
+            overflow: 'hidden',
+            display: '-webkit-box',
+            WebkitLineClamp: 2,
+            WebkitBoxOrient: 'vertical',
+            wordBreak: 'break-word',
+          }}>
+            {event?.title || 'Untitled Event'}
+          </div>
+          <div style={{ 
+            fontSize: '11px',
+            fontWeight: 500,
+            color: isDark ? '#94a3b8' : '#64748b',
+          }}>
+            {formatTime(event?.startDate)}
+          </div>
+          
+          {!event?.minmized && event?.description && (
             <div style={{ 
-              display: 'flex', 
-              alignItems: 'center', 
-              gap: '8px',
-              width: '100%'
+              fontSize: '12px',
+              lineHeight: '1.5',
+              color: isDark ? '#94a3b8' : '#64748b',
+              wordBreak: 'break-word',
+              overflowWrap: 'break-word',
+              whiteSpace: 'normal'
             }}>
-              <div style={{ 
-                fontWeight: 600, 
-                fontSize: '13px',
-                lineHeight: '1.2',
-                color: finalTextColor,
-                overflow: 'hidden',
-                textOverflow: 'ellipsis',
-                whiteSpace: 'nowrap',
-                flex: 1,
-                letterSpacing: '-0.01em'
-              }}>
-                {event?.title || 'Untitled Event'}
-              </div>
-              <div style={{ 
-                fontSize: '11px',
-                fontWeight: 500,
-                color: finalTextColor,
-                opacity: 0.85,
-                whiteSpace: 'nowrap',
-                letterSpacing: '0.01em'
-              }}>
-                {formatTime(event?.startDate)}
-              </div>
+              {event?.description}
             </div>
-          ) : (
-            <>
-              <div style={{ 
-                display: 'flex', 
-                alignItems: 'flex-start', 
-                justifyContent: 'space-between', 
-                gap: '8px',
-                marginBottom: event?.description ? '6px' : 0
-              }}>
-                <div style={{ 
-                  fontWeight: 600, 
-                  fontSize: '14px',
-                  lineHeight: '1.3',
-                  color: finalTextColor,
-                  overflow: 'hidden',
-                  textOverflow: 'ellipsis',
-                  whiteSpace: 'nowrap',
-                  flex: 1,
-                  letterSpacing: '-0.01em'
-                }}>
-                  {event?.title || 'Untitled Event'}
-                </div>
-                <div style={{ 
-                  fontSize: '11px',
-                  fontWeight: 500,
-                  color: finalTextColor,
-                  opacity: 0.85,
-                  whiteSpace: 'nowrap',
-                  letterSpacing: '0.01em'
-                }}>
-                  {formatTime(event?.startDate)}
-                </div>
-              </div>
-              {event?.description && (
-                <div style={{ 
-                  fontSize: '12px',
-                  lineHeight: '1.4',
-                  color: finalTextColor,
-                  opacity: 0.85,
-                  display: '-webkit-box',
-                  WebkitLineClamp: 2,
-                  WebkitBoxOrient: 'vertical',
-                  overflow: 'hidden',
-                  letterSpacing: '-0.005em'
-                }}>
-                  {event?.description}
-                </div>
-              )}
-            </>
           )}
         </div>
       )}

@@ -398,6 +398,17 @@ html.dark .landing-nav .nav-link {
   color: #0b1220 !important;
 }
 html.dark .signin-root h1,
+/* Event delete button: show only on group hover. Narrow selector to avoid interfering with other buttons. */
+.group:hover .event-delete-btn {
+  opacity: 1 !important;
+  transform: scale(1) !important;
+  pointer-events: auto !important;
+}
+
+/* Small transition for the delete button so it appears smoothly */
+.event-delete-btn {
+  transition: opacity 120ms ease, transform 120ms ease;
+}
 html.dark .signup-root h1 {
   color: #0b1220 !important;
 }
@@ -431,6 +442,38 @@ html.dark .signup-root p {
   height: 100%;
   border-radius: 0;
 }
+
+/* Dark-mode input visibility: ensure form controls show their values and placeholders
+   when html.dark is present. This covers -webkit-text-fill-color for Chromium, plus
+   color rules for Firefox and native controls. Placed near the end to win over
+   other utility remaps. */
+html.dark input,
+html.dark textarea,
+html.dark select,
+html.dark .input,
+html.dark .form-control {
+  color: rgba(255, 255, 255, 0.92) !important;
+  -webkit-text-fill-color: rgba(255, 255, 255, 0.92) !important; /* Chromium */
+}
+
+html.dark input::placeholder,
+html.dark textarea::placeholder {
+  color: rgba(255, 255, 255, 0.56) !important;
+  opacity: 1 !important;
+}
+
+/* Number input spin/button color fallback */
+html.dark input[type="number"] {
+  color: rgba(255, 255, 255, 0.92) !important;
+  -webkit-text-fill-color: rgba(255, 255, 255, 0.92) !important;
+}
+
+/* Date/time picker icon visibility */
+html.dark input[type="date"]::-webkit-calendar-picker-indicator,
+html.dark input[type="time"]::-webkit-calendar-picker-indicator {
+  filter: invert(1) !important;
+}
+
 .modal-header {
   display: flex;
   align-items: center;
@@ -4682,4 +4725,148 @@ html.dark select.force-light-select:focus {
   -webkit-text-fill-color: #0b1220 !important;
   border-color: rgba(0, 0, 0, 0.06) !important;
   background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='20' height='20' viewBox='0 0 24 24' fill='none' stroke='%230b1220' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><polyline points='6 9 12 15 18 9'></polyline></svg>") !important;
+}
+
+/* Narrow override for the small event delete control used inside event tiles.
+   The codebase contains many high-specificity and !important rules that
+   can unintentionally change small controls. This rule is intentionally
+   narrow and placed at the end of the stylesheet so it can override those
+   rules without touching the global theme tokens. */
+.event-delete-btn {
+  background-color: rgba(255, 255, 255, 0.9) !important;
+  border: 1px solid rgba(203, 213, 225, 0.8) !important;
+  width: 20px !important;
+  height: 20px !important;
+  padding: 0 !important;
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  border-radius: 4px !important;
+  cursor: pointer !important;
+  pointer-events: auto !important;
+}
+
+html.dark .event-delete-btn {
+  background-color: rgba(15, 23, 42, 0.8) !important;
+  border: 1px solid rgba(71, 85, 105, 0.5) !important;
+}
+
+.event-delete-btn svg {
+  display: block !important;
+  width: 12px !important;
+  height: 12px !important;
+  stroke: rgba(203, 213, 225, 1) !important; /* light stroke in dark */
+}
+
+html:not(.dark) .event-delete-btn svg {
+  stroke: #64748b !important; /* muted stroke in light */
+}
+
+/* Stronger attribute-based selector to beat very broad or !important rules.
+   Targets the delete button specifically when used inside event items/cards. */
+.event-item button[aria-label="Delete event"],
+.event-card button[aria-label="Delete event"],
+.event-card-list-item button[aria-label="Delete event"] {
+  background-color: rgba(255, 255, 255, 0.95) !important;
+  border: 1px solid rgba(203, 213, 225, 0.9) !important;
+  width: 20px !important;
+  height: 20px !important;
+  padding: 0 !important;
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  border-radius: 4px !important;
+  cursor: pointer !important;
+  box-shadow: none !important;
+}
+
+html.dark .event-item button[aria-label="Delete event"],
+html.dark .event-card button[aria-label="Delete event"],
+html.dark .event-card-list-item button[aria-label="Delete event"] {
+  background-color: rgba(15, 23, 42, 0.8) !important;
+  border: 1px solid rgba(71, 85, 105, 0.6) !important;
+}
+
+.event-item button[aria-label="Delete event"] svg,
+.event-card button[aria-label="Delete event"] svg,
+.event-card-list-item button[aria-label="Delete event"] svg {
+  stroke: rgba(203, 213, 225, 1) !important;
+  width: 12px !important;
+  height: 12px !important;
+  display: block !important;
+}
+
+/* Hover states: move to red background on hover to match previous behavior */
+.event-item button[aria-label="Delete event"]:hover,
+.event-card button[aria-label="Delete event"]:hover,
+.event-card-list-item button[aria-label="Delete event"]:hover {
+  background-color: #ef4444 !important;
+  border-color: #dc2626 !important;
+}
+
+html.dark .event-item button[aria-label="Delete event"]:hover,
+html.dark .event-card button[aria-label="Delete event"]:hover,
+html.dark .event-card-list-item button[aria-label="Delete event"]:hover {
+  background-color: #dc2626 !important;
+  border-color: #b91c1c !important;
+}
+
+/* Performance: limit repaint/containment for event tiles to reduce layout thrash */
+.event-tile {
+  contain: paint layout; /* allow browser to isolate paint/layout for these tiles */
+  will-change: transform, opacity; /* hint to browser which properties may change */
+}
+
+/* Narrowly-scoped delete button reveal on group hover. This avoids global color overrides
+   forcing the button to take unrelated theme colors. Keep the rule specific and minimal. */
+.group:hover .event-delete-btn {
+  opacity: 1 !important;
+  transform: translateY(0) scale(1) !important;
+  pointer-events: auto !important;
+}
+
+.event-delete-btn {
+  opacity: 0;
+  transform: translateY(-4px) scale(0.95);
+  transition: opacity 140ms ease, transform 140ms ease;
+  pointer-events: none;
+}
+
+/* Ensure the delete svg icon uses explicit stroke so global theme remaps don't recolor it */
+.event-delete-btn svg {
+  stroke: currentColor; /* component sets color explicitly on svg if needed */
+}
+
+/* Safe, narrow override for the small delete control used inside event tiles.
+   Keep this limited to `.event-delete-btn` so it can't affect other event visuals.
+   The control is icon-only by default and reveals a subtle neutral backing when
+   its parent `.group` is hovered; the button shows a red background when hovered. */
+.event-delete-btn {
+  background: transparent !important;
+  border: none !important;
+  width: 20px !important;
+  height: 20px !important;
+  padding: 0 !important;
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  border-radius: 4px !important;
+  box-shadow: none !important;
+  opacity: 0 !important;
+  transform: translateY(-4px) scale(0.95) !important;
+  pointer-events: none !important; /* hidden until parent hover reveals it */
+}
+
+.group:hover > .event-delete-btn,
+.group:hover .event-delete-btn {
+  opacity: 1 !important;
+  transform: translateY(0) scale(1) !important;
+  pointer-events: auto !important;
+  background: rgba(255, 255, 255, 0.06) !important;
+}
+
+.event-delete-btn:hover {
+  background: #dc2626 !important; /* red hover */
+  border-color: #b91c1c !important;
+  color: #fff !important;
 }

@@ -63,23 +63,40 @@ export default function WeeklyView({
     currentDate.getFullYear()
   );
 
+  const rAFRef = useRef<number | null>(null);
+  const lastMouseEventRef = useRef<MouseEvent | null>(null);
+
   const handleMouseMove = useCallback((e: React.MouseEvent<HTMLDivElement, MouseEvent>) => {
     if (!hoursColumnRef.current) return;
-    const rect = hoursColumnRef.current.getBoundingClientRect();
-    const y = e.clientY - rect.top;
-    const hourHeight = rect.height / 24;
-    const hour = Math.max(0, Math.min(23, Math.floor(y / hourHeight)));
-    const minuteFraction = (y % hourHeight) / hourHeight;
-    const minutes = Math.floor(minuteFraction * 60);
-    
-    const hour12 = hour % 12 || 12;
-    const ampm = hour < 12 ? "AM" : "PM";
-    setDetailedHour(
-      `${hour12}:${minutes.toString().padStart(2, "0")} ${ampm}`
-    );
-    
-    const position = Math.max(0, Math.min(rect.height, Math.round(y)));
-    setTimelinePosition(position);
+    lastMouseEventRef.current = e.nativeEvent;
+
+    if (rAFRef.current == null) {
+      rAFRef.current = requestAnimationFrame(() => {
+        try {
+          const ev = lastMouseEventRef.current;
+          if (!ev || !hoursColumnRef.current) return;
+          const rect = hoursColumnRef.current.getBoundingClientRect();
+          const y = ev.clientY - rect.top;
+          const hourHeight = rect.height / 24;
+          const hour = Math.max(0, Math.min(23, Math.floor(y / hourHeight)));
+          const minuteFraction = (y % hourHeight) / hourHeight;
+          const minutes = Math.floor(minuteFraction * 60);
+
+          const hour12 = hour % 12 || 12;
+          const ampm = hour < 12 ? "AM" : "PM";
+          setDetailedHour(`${hour12}:${minutes.toString().padStart(2, '0')} ${ampm}`);
+
+          const position = Math.max(0, Math.min(rect.height, Math.round(y)));
+          setTimelinePosition(position);
+        } finally {
+          if (rAFRef.current != null) { cancelAnimationFrame(rAFRef.current); rAFRef.current = null; }
+        }
+      });
+    }
+  }, []);
+
+  React.useEffect(() => {
+    return () => { if (rAFRef.current != null) { cancelAnimationFrame(rAFRef.current); rAFRef.current = null; } };
   }, []);
 
   function handleAddEvent(event?: Event) {
@@ -159,73 +176,7 @@ export default function WeeklyView({
     });
   }
 
-  const groupEventsByTimePeriod = (events: Event[] | undefined) => {
-    if (!events || events.length === 0) return [];
-    
-    const sortedEvents = [...events].sort((a, b) => 
-      new Date(a.startDate).getTime() - new Date(b.startDate).getTime()
-    );
-    
-    const eventsOverlap = (event1: Event, event2: Event) => {
-      const start1 = new Date(event1.startDate).getTime();
-      const end1 = new Date(event1.endDate).getTime();
-      const start2 = new Date(event2.startDate).getTime();
-      const end2 = new Date(event2.endDate).getTime();
-      
-      return (start1 < end2 && start2 < end1);
-    };
-    
-    const graph: Record<string, Set<string>> = {};
-    
-    for (const event of sortedEvents) {
-      graph[event.id] = new Set<string>();
-    }
-    
-    for (let i = 0; i < sortedEvents.length; i++) {
-      for (let j = i + 1; j < sortedEvents.length; j++) {
-        if (eventsOverlap(sortedEvents[i], sortedEvents[j])) {
-          graph[sortedEvents[i].id].add(sortedEvents[j].id);
-          graph[sortedEvents[j].id].add(sortedEvents[i].id);
-        }
-      }
-    }
-    
-    const visited = new Set<string>();
-    const groups: Event[][] = [];
-    
-    for (const event of sortedEvents) {
-      if (!visited.has(event.id)) {
-        const group: Event[] = [];
-        const stack: Event[] = [event];
-        visited.add(event.id);
-        
-        while (stack.length > 0) {
-          const current = stack.pop()!;
-          group.push(current);
-          
-          for (const neighborId of graph[current.id]) {
-            if (!visited.has(neighborId)) {
-              const neighbor = sortedEvents.find(e => e.id === neighborId);
-              if (neighbor) {
-                stack.push(neighbor);
-                visited.add(neighborId);
-              }
-            }
-          }
-        }
-        
-        group.sort((a, b) => 
-          new Date(a.startDate).getTime() - new Date(b.startDate).getTime()
-        );
-        
-        groups.push(group);
-      }
-    }
-    
-    return groups;
-  };
-
-  const computeMinaStyle = (event: Event, allDayEvents: Event[] | undefined) => {
+  const computeMinaStyle = React.useCallback((event: Event, allDayEvents: Event[] | undefined) => {
     const ROW_PX_PER_HOUR = 64;
     const ensureDate = (d: any) => (d instanceof Date ? d : new Date(d));
 
@@ -290,15 +241,14 @@ export default function WeeklyView({
       top: `${topPx}px`,
       zIndex: colIndex + 1,
       left: `${leftPercent}%`,
-      maxWidth: `${widthPercent}%`,
-      minWidth: `${widthPercent}%`,
+      width: `${widthPercent}%`,
     };
-  };
+  }, []);
 
   return (
-    <div className="bg-gray-50/30 rounded-xl p-6">
+    <div className="bg-gray-50/50 dark:bg-slate-900/50 rounded-xl p-6">
       <div className="flex justify-between items-center mb-6">
-        <h1 className="text-3xl font-bold text-gray-900">
+        <h1 className="text-3xl font-bold text-gray-900 dark:text-white">
           Week {getters.getWeekNumber(currentDate)}
         </h1>
 
@@ -311,7 +261,7 @@ export default function WeeklyView({
               style={{ padding: '0.5rem 1rem' }}
               className={cn(
                 classNames?.prev,
-                'text-gray-700 border-gray-200 hover:bg-gray-50 hover:border-gray-300 transition-all duration-200 shadow-sm'
+                'text-gray-700 dark:text-slate-300 border-gray-300 dark:border-slate-600 hover:bg-gray-100 dark:hover:bg-slate-800 hover:border-gray-400 dark:hover:border-slate-500 transition-all duration-200 shadow-sm'
               )}
               onClick={handlePrevWeek}
             >
@@ -327,7 +277,7 @@ export default function WeeklyView({
               style={{ padding: '0.5rem 1rem' }}
               className={cn(
                 classNames?.next,
-                'text-gray-700 border-gray-200 hover:bg-gray-50 hover:border-gray-300 transition-all duration-200 shadow-sm'
+                'text-gray-700 dark:text-slate-300 border-gray-300 dark:border-slate-600 hover:bg-gray-100 dark:hover:bg-slate-800 hover:border-gray-400 dark:hover:border-slate-500 transition-all duration-200 shadow-sm'
               )}
               onClick={handleNextWeek}
             >
@@ -347,16 +297,16 @@ export default function WeeklyView({
           animate="center"
           exit="exit"
           transition={{ opacity: { duration: 0.2 } }}
-          className="relative rounded-xl bg-white border border-gray-200 shadow-sm overflow-hidden"
+          className="relative rounded-xl bg-white dark:bg-slate-800 border border-gray-200 dark:border-slate-700 shadow-md overflow-hidden"
         >
           <div className="flex">
             {/* Hours Column */}
-            <div className="flex flex-col bg-gray-50/50 border-r border-gray-200">
-              <div className="h-[80px] px-4 py-2 border-b border-gray-200"></div>
+            <div className="flex flex-col bg-gray-50 dark:bg-slate-900 border-r border-gray-200 dark:border-slate-700">
+              <div className="h-[80px] px-3 py-2 border-b border-gray-200 dark:border-slate-700"></div>
               {hours.map((hour, index) => (
                 <div
                   key={`hour-${index}`}
-                  className="px-4 py-2 h-[64px] flex items-center text-left text-sm text-gray-600 font-medium"
+                  className="px-3 py-2 h-[64px] flex items-center text-left text-xs font-medium text-gray-600 dark:text-slate-400"
                 >
                   {hour}
                 </div>
@@ -366,145 +316,130 @@ export default function WeeklyView({
             {/* Days Grid */}
             <div className="flex-grow">
               {/* Day Headers */}
-              <div className="grid grid-cols-7 border-b border-gray-200 bg-gray-50/50">
+              <div className="grid grid-cols-7 border-b border-gray-200 dark:border-slate-700 bg-gray-50 dark:bg-slate-900">
                 {daysOfWeek.map((day, idx) => {
                   const isToday =
                     new Date().getDate() === day.getDate() &&
                     new Date().getMonth() === currentDate.getMonth() &&
                     new Date().getFullYear() === currentDate.getFullYear();
+                  
+                  const dayEvents = getters.getEventsForDay(day.getDate(), currentDate);
+                  const eventCount = dayEvents?.length || 0;
 
                   return (
                     <div
                       key={idx}
-                      className="relative group h-[80px] flex flex-col items-center justify-center border-r border-gray-200 last:border-r-0"
+                      className="relative group h-[80px] flex flex-col items-center justify-center border-r border-gray-200 dark:border-slate-700 last:border-r-0 hover:bg-gray-100 dark:hover:bg-slate-800 transition-colors"
                     >
-                      <div className="text-sm font-medium text-gray-600">
+                      <div className="text-xs font-medium text-gray-600 dark:text-slate-400 uppercase tracking-wide">
                         {getters.getDayName(day.getDay())}
                       </div>
                       <div
                         className={cn(
-                          "text-lg font-semibold mt-1",
+                          "text-2xl font-bold mt-1",
                           isToday
-                            ? "text-purple-600"
-                            : "text-gray-900"
+                            ? "text-purple-600 dark:text-purple-400"
+                            : "text-gray-900 dark:text-white"
                         )}
                       >
                         {day.getDate()}
                       </div>
 
-                      {/* Fullscreen icon */}
-                      <div
-                        className="absolute top-2 right-2 cursor-pointer opacity-0 group-hover:opacity-100 transition-opacity"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          const selectedDay = new Date(
-                            currentDate.getFullYear(),
-                            currentDate.getMonth(),
-                            day.getDate()
-                          );
-                          
-                          const dayEvents = getters.getEventsForDay(
-                            day.getDate(),
-                            currentDate
-                          );
-                          
-                          setOpen(
-                            <CustomModal title={`${getters.getDayName(day.getDay())} ${day.getDate()}, ${selectedDay.getFullYear()}`}>
-                              <div className="flex flex-col space-y-4 p-4">
-                                <div className="flex items-center mb-4">
-                                  <ChevronLeft 
-                                    className="cursor-pointer hover:text-purple-600 mr-2" 
-                                    onClick={() => setOpen(null)}
-                                  />
-                                  <h2 className="text-2xl font-bold">{selectedDay.toDateString()}</h2>
-                                </div>
-                                
-                                {dayEvents && dayEvents.length > 0 ? (
-                                  <div className="space-y-4">
-                                    <div className="relative bg-gray-50 rounded-lg p-4 min-h-[500px]">
-                                      <div className="grid grid-cols-[100px_1fr] h-full">
-                                        <div className="flex flex-col">
-                                          {hours.map((hour, index) => (
-                                            <div
-                                              key={`hour-${index}`}
-                                              className="h-16 p-2 text-sm text-gray-600 border-r border-b border-gray-200"
-                                            >
-                                              {hour}
-                                            </div>
-                                          ))}
-                                        </div>
-                                        
-                                        <div className="relative">
-                                          {Array.from({ length: 24 }).map((_, index) => (
-                                            <div
-                                              key={`grid-${index}`}
-                                              className="h-16 border-b border-gray-200"
-                                            />
-                                          ))}
-                                          
-                                          {dayEvents.map((event) => {
-                                            const { height, top, left, maxWidth, minWidth } = computeMinaStyle(event, dayEvents);
-                                            
-                                            return (
-                                              <div
-                                                key={event.id}
-                                                style={{
-                                                  position: 'absolute',
-                                                  display: 'block',
-                                                  height,
-                                                  minHeight: height,
-                                                  top,
-                                                  left,
-                                                  maxWidth,
-                                                  minWidth,
-                                                  padding: '0 2px',
-                                                  boxSizing: 'border-box',
-                                                  overflow: 'visible'
-                                                }}
-                                              >
-                                                <EventStyled
-                                                  event={{
-                                                    ...event,
-                                                    CustomEventComponent,
-                                                    minmized: true,
-                                                  }}
-                                                  CustomEventModal={CustomEventModal}
-                                                />
-                                              </div>
-                                            );
-                                          })}
-                                        </div>
-                                      </div>
-                                    </div>
-                                  </div>
-                                ) : (
-                                  <div className="text-center py-10 text-gray-500">
-                                    <p>No events scheduled for this day</p>
+                      {/* Event count indicator */}
+                      {eventCount > 0 && (
+                        <div
+                          className="absolute top-1 right-1 cursor-pointer transition-all hover:scale-125"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            const selectedDay = new Date(
+                              currentDate.getFullYear(),
+                              currentDate.getMonth(),
+                              day.getDate()
+                            );
+                            
+                            setOpen(
+                              <CustomModal title={`${getters.getDayName(day.getDay())}, ${selectedDay.toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' })}`}>
+                                <div className="flex flex-col space-y-4 p-6">
+                                  <div className="flex items-center justify-between mb-4">
+                                    <h2 className="text-2xl font-bold text-gray-900 dark:text-white">
+                                      {eventCount} {eventCount === 1 ? 'Event' : 'Events'}
+                                    </h2>
                                     <Button 
-                                      variant="outline" 
-                                      className="mt-4"
                                       onClick={() => {
                                         setOpen(null);
                                         handleAddEventWeek(idx, detailedHour || "12:00 PM");
                                       }}
+                                      className="bg-purple-600 hover:bg-purple-700 text-white"
                                     >
-                                      Add Event
+                                      + Add Event
                                     </Button>
                                   </div>
-                                )}
-                              </div>
-                            </CustomModal>
-                          );
-                        }}
-                      >
-                        <Maximize size={16} className="text-gray-400 hover:text-purple-600" />
-                      </div>
+                                  
+                                  <div className="space-y-3 max-h-[600px] overflow-y-auto pr-2">
+                                    {dayEvents
+                                      .sort((a, b) => new Date(a.startDate).getTime() - new Date(b.startDate).getTime())
+                                      .map((event) => {
+                                        const startTime = new Date(event.startDate);
+                                        const endTime = new Date(event.endDate);
+                                        const formatTime = (date: Date) => {
+                                          const hours = date.getHours();
+                                          const minutes = date.getMinutes();
+                                          const ampm = hours >= 12 ? 'PM' : 'AM';
+                                          const hour12 = hours % 12 || 12;
+                                          return `${hour12}:${minutes.toString().padStart(2, '0')} ${ampm}`;
+                                        };
+
+                                        return (
+                                          <div
+                                            key={event.id}
+                                            className="bg-white dark:bg-slate-800 border border-gray-200 dark:border-slate-700 rounded-lg p-4 hover:shadow-md transition-shadow cursor-pointer relative"
+                                          >
+                                            <Badge 
+                                              className={cn(
+                                                "absolute top-4 right-4",
+                                                event.variant === 'primary' && "bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-300",
+                                                event.variant === 'warning' && "bg-yellow-100 text-yellow-700 dark:bg-yellow-900/30 dark:text-yellow-300",
+                                                event.variant === 'success' && "bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-300",
+                                                event.variant === 'danger' && "bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-300",
+                                                event.variant === 'default' && "bg-gray-100 text-gray-700 dark:bg-gray-900/30 dark:text-gray-300"
+                                              )}
+                                            >
+                                              {event.variant || 'Event'}
+                                            </Badge>
+                                            <div className="pr-20">
+                                              <h3 className="text-lg font-semibold text-gray-900 dark:text-white mb-2">
+                                                {event.title || 'Untitled Event'}
+                                              </h3>
+                                              <div className="flex items-center gap-2 text-sm text-gray-600 dark:text-slate-400">
+                                                <span className="font-medium">
+                                                  {formatTime(startTime)} - {formatTime(endTime)}
+                                                </span>
+                                              </div>
+                                              {event.description && (
+                                                <p className="mt-2 text-sm text-gray-600 dark:text-slate-400">
+                                                  {event.description}
+                                                </p>
+                                              )}
+                                            </div>
+                                          </div>
+                                        );
+                                      })}
+                                  </div>
+                                </div>
+                              </CustomModal>
+                            );
+                          }}
+                        >
+                          <div className="text-[10px] font-medium text-purple-600 dark:text-purple-400 hover:underline">
+                            {eventCount} {eventCount === 1 ? 'event' : 'events'}
+                          </div>
+                        </div>
+                      )}
                     </div>
                   );
                 })}
               </div>
-
-              {/* Time Grid with Events */}
+              
               <div
                 ref={hoursColumnRef}
                 onMouseMove={handleMouseMove}
@@ -520,57 +455,76 @@ export default function WeeklyView({
                   return (
                     <div
                       key={`day-${dayIndex}`}
-                      className="relative border-r border-gray-200 last:border-r-0"
+                      className="relative border-r border-gray-200 dark:border-slate-700 last:border-r-0 bg-white dark:bg-slate-800"
                     >
                       {/* Hour cells */}
                       {Array.from({ length: 24 }, (_, hourIndex) => (
                         <div
                           key={`day-${dayIndex}-hour-${hourIndex}`}
                           onClick={() => handleAddEventWeek(dayIndex, detailedHour as string)}
-                          className="h-[64px] border-b border-gray-100 hover:bg-purple-50/30 transition duration-300 cursor-pointer relative"
+                          className={cn(
+                            "h-[64px] border-b transition duration-200 cursor-pointer relative",
+                            "border-gray-100 dark:border-slate-700/50",
+                            "hover:bg-purple-50 dark:hover:bg-purple-900/10"
+                          )}
                         >
-                          <div className="absolute bg-purple-500/10 flex items-center justify-center text-sm font-medium text-purple-700 opacity-0 transition left-0 top-0 duration-250 hover:opacity-100 w-full h-full pointer-events-none">
+                          <div className="absolute bg-purple-500/10 dark:bg-purple-500/20 flex items-center justify-center text-sm font-medium text-purple-700 dark:text-purple-300 opacity-0 transition left-0 top-0 duration-250 hover:opacity-100 w-full h-full pointer-events-none">
                             + Add Event
                           </div>
                         </div>
                       ))}
 
-                      {/* Events */}
-                      <AnimatePresence initial={false}>
-                        {dayEvents?.map((event) => {
-                          const { height, left, maxWidth, minWidth, top } = computeMinaStyle(event, dayEvents);
+                      {/* Events - FIXED RENDERING */}
+                      <div className="absolute inset-0 pointer-events-none">
+                        <AnimatePresence initial={false}>
+                          {dayEvents?.map((event) => {
+                            const style = computeMinaStyle(event, dayEvents);
+                            const manyEvents = (dayEvents?.length || 0) > 30;
 
-                          return (
-                            <MotionDiv
-                              key={event.id}
-                              style={{
-                                minHeight: height,
-                                height,
-                                top: top,
-                                left: left,
-                                maxWidth: maxWidth,
-                                minWidth: minWidth,
-                                padding: '0 2px',
-                                boxSizing: 'border-box',
-                              }}
-                              className="absolute transition-all duration-300 z-50 block pointer-events-auto"
-                              initial={{ opacity: 0, scale: 0.9 }}
-                              animate={{ opacity: 1, scale: 1 }}
-                              exit={{ opacity: 0, scale: 0.9 }}
-                              transition={{ duration: 0.2 }}
-                            >
-                              <EventStyled
-                                event={{
-                                  ...event,
-                                  CustomEventComponent,
-                                  minmized: true,
+                            const eventElement = (
+                              <div
+                                style={{
+                                  position: 'absolute',
+                                  height: style.height,
+                                  top: style.top,
+                                  left: style.left,
+                                  width: style.width,
+                                  zIndex: style.zIndex,
+                                  pointerEvents: 'auto',
+                                  paddingLeft: '2px',
+                                  paddingRight: '2px',
                                 }}
-                                CustomEventModal={CustomEventModal}
-                              />
-                            </MotionDiv>
-                          );
-                        })}
-                      </AnimatePresence>
+                              >
+                                <EventStyled
+                                  event={{
+                                    ...event,
+                                    CustomEventComponent,
+                                    minmized: true,
+                                  }}
+                                  CustomEventModal={CustomEventModal}
+                                />
+                              </div>
+                            );
+
+                            if (manyEvents) {
+                              return <React.Fragment key={event.id}>{eventElement}</React.Fragment>;
+                            }
+
+                            return (
+                              <MotionDiv
+                                key={event.id}
+                                initial={{ opacity: 0, scale: 0.95 }}
+                                animate={{ opacity: 1, scale: 1 }}
+                                exit={{ opacity: 0, scale: 0.95 }}
+                                transition={{ duration: 0.15 }}
+                                style={{ position: 'relative' }}
+                              >
+                                {eventElement}
+                              </MotionDiv>
+                            );
+                          })}
+                        </AnimatePresence>
+                      </div>
                     </div>
                   );
                 })}
@@ -581,12 +535,12 @@ export default function WeeklyView({
           {/* Timeline indicator */}
           {detailedHour && (
             <div
-              className="absolute left-[80px] w-[calc(100%-80px)] h-[2px] bg-purple-500/50 rounded-full pointer-events-none z-40"
+              className="absolute left-[60px] w-[calc(100%-60px)] h-[2px] bg-purple-500 dark:bg-purple-400 rounded-full pointer-events-none z-40 shadow-sm"
               style={{ top: `${timelinePosition + 80}px` }}
             >
               <Badge
                 variant="outline"
-                className="absolute -translate-y-1/2 bg-white border-purple-300 text-purple-700 font-medium z-50 left-[-65px] text-xs shadow-sm"
+                className="absolute -translate-y-1/2 bg-white dark:bg-slate-800 border-purple-400 dark:border-purple-500 text-purple-700 dark:text-purple-300 font-medium z-50 left-[-55px] text-xs shadow-md"
               >
                 {detailedHour}
               </Badge>
