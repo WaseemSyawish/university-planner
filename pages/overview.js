@@ -147,6 +147,26 @@ export default function UniversityOverview() {
           // Build today's list and week count from classesSrc when available
           let todayList = [];
           let weekCount = 0;
+          // Helper to determine if an item represents a lecture
+          const isLectureItem = (it) => {
+            try {
+              const t = (it && (it.type || (it.raw && it.raw.type) || it.eventType || '')).toString().toLowerCase();
+              return t === 'lecture';
+            } catch (e) { return false; }
+          };
+          // Convert a date-like value into a local YYYY-MM-DD string (safe against
+          // date-only strings being parsed as UTC). Returns null on invalid input.
+          const toLocalYmd = (v) => {
+            try {
+              const dt = new Date(String(v));
+              if (isNaN(dt.getTime())) return null;
+              const y = dt.getFullYear();
+              const m = String(dt.getMonth() + 1).padStart(2, '0');
+              const d = String(dt.getDate()).padStart(2, '0');
+              return `${y}-${m}-${d}`;
+            } catch (e) { return null; }
+          };
+          const todayYmd = toLocalYmd(currentDate);
           if (Array.isArray(classesSrc) && classesSrc.length) {
             try {
               const startWeek = new Date(currentDate);
@@ -172,16 +192,20 @@ export default function UniversityOverview() {
                   const d = (typeof c.date === 'string' && c.date.length >= 10) ? c.date.slice(0,10) : (new Date(c.date)).toISOString().slice(0,10);
                     try {
                       const dd = new Date(d);
-                      if (!isNaN(dd.getTime()) && dd.toDateString() === currentDate.toDateString()) todayList.push({ id: c.id || `tt-${d}`, code: c.code || c.module || (c.subject||'').split(' ')[0] || 'TBA', name: c.title || c.subject || c.module || 'Class', time: start ? `${start} - ${end}` : '', instructor: c.instructor || c.lecturer || '', location: c.location || '' });
-                      if (!isNaN(dd.getTime()) && dd >= startWeek && dd <= endWeek) weekCount++;
+                      const ddY = toLocalYmd(dd);
+                      if (ddY && todayYmd && ddY === todayYmd && isLectureItem(c)) todayList.push({ id: c.id || `tt-${d}`, code: c.code || c.module || (c.subject||'').split(' ')[0] || 'TBA', name: c.title || c.subject || c.module || 'Lecture', time: start ? `${start} - ${end}` : '', instructor: c.instructor || c.lecturer || '', location: c.location || '' });
+                      if (!isNaN(dd.getTime())) {
+                        const ddMid = new Date(dd.getFullYear(), dd.getMonth(), dd.getDate());
+                        if (ddMid >= startWeek && ddMid <= endWeek && isLectureItem(c)) weekCount++;
+                      }
                     } catch (e) {}
                   continue;
                 }
 
                 const dow = (typeof c.dayOfWeek === 'number') ? c.dayOfWeek : (c.repeatOption === 'weekly' && typeof c.dayOfWeek === 'number' ? c.dayOfWeek : null);
                 if (dow != null) {
-                  if (dow === currentDate.getDay()) todayList.push({ id: c.id || `tt-${dow}-${start}`, code: c.code || c.module || (c.subject||'').split(' ')[0] || 'TBA', name: c.title || c.subject || c.module || 'Class', time: start ? `${start} - ${end}` : '', instructor: c.instructor || c.lecturer || '', location: c.location || '' });
-                  weekCount++;
+                  if (dow === currentDate.getDay() && isLectureItem(c)) todayList.push({ id: c.id || `tt-${dow}-${start}`, code: c.code || c.module || (c.subject||'').split(' ')[0] || 'TBA', name: c.title || c.subject || c.module || 'Lecture', time: start ? `${start} - ${end}` : '', instructor: c.instructor || c.lecturer || '', location: c.location || '' });
+                  if (isLectureItem(c)) weekCount++;
                   continue;
                 }
 
@@ -189,8 +213,12 @@ export default function UniversityOverview() {
                   const d = (typeof c.date === 'string' && c.date.length >= 10) ? c.date.slice(0,10) : (new Date(c.date)).toISOString().slice(0,10);
                   try {
                     const dd = new Date(d);
-                    if (!isNaN(dd.getTime()) && dd.toDateString() === currentDate.toDateString()) todayList.push({ id: c.id || `tt-${d}`, code: c.code || c.module || (c.subject||'').split(' ')[0] || 'TBA', name: c.title || c.subject || c.module || 'Class', time: start ? `${start} - ${end}` : '', instructor: c.instructor || c.lecturer || '', location: c.location || '' });
-                    if (!isNaN(dd.getTime()) && dd >= startWeek && dd <= endWeek) weekCount++;
+                    const ddY = toLocalYmd(dd);
+                    if (ddY && todayYmd && ddY === todayYmd && isLectureItem(c)) todayList.push({ id: c.id || `tt-${d}`, code: c.code || c.module || (c.subject||'').split(' ')[0] || 'TBA', name: c.title || c.subject || c.module || 'Lecture', time: start ? `${start} - ${end}` : '', instructor: c.instructor || c.lecturer || '', location: c.location || '' });
+                    if (!isNaN(dd.getTime())) {
+                      const ddMid = new Date(dd.getFullYear(), dd.getMonth(), dd.getDate());
+                      if (ddMid >= startWeek && ddMid <= endWeek && isLectureItem(c)) weekCount++;
+                    }
                   } catch (e) {}
                 }
               }
@@ -202,13 +230,15 @@ export default function UniversityOverview() {
               try {
               const evs = await safeFetchJson('/api/events');
               setDebugEventsRaw(evs);
-              if (evs && Array.isArray(evs.events)) {
+                if (evs && Array.isArray(evs.events)) {
                 todayList = evs.events.filter(e => {
-                  if (!(e.type === 'lecture' || e.type === 'class' || (e.raw && e.raw.type === 'lecture'))) return false;
+                  const t = (e && (e.type || (e.raw && e.raw.type) || '')).toString().toLowerCase();
+                  if (t !== 'lecture') return false;
                   if (!e.date) return false;
                   try {
                     const ed = new Date(e.date);
-                    return !isNaN(ed.getTime()) && ed.toDateString() === currentDate.toDateString();
+                    const edY = toLocalYmd(ed);
+                    return edY && todayYmd && edY === todayYmd;
                   } catch (er) { return false; }
                 }).map((e,i) => ({
                   id: e.id || `ev-${i}`,
@@ -229,7 +259,9 @@ export default function UniversityOverview() {
                     if (!ev.date) return cnt;
                     const d = new Date(ev.date);
                     if (isNaN(d.getTime())) return cnt;
-                    return (d >= startWeek && d <= endWeek && (ev.type === 'lecture' || ev.type === 'class')) ? cnt + 1 : cnt;
+                    const dMid = new Date(d.getFullYear(), d.getMonth(), d.getDate());
+                    const t = (ev && (ev.type || (ev.raw && ev.raw.type) || '')).toString().toLowerCase();
+                    return (dMid >= startWeek && dMid <= endWeek && t === 'lecture') ? cnt + 1 : cnt;
                   }, 0);
                 } catch (e) { weekCount = 0; }
               }
@@ -257,7 +289,8 @@ export default function UniversityOverview() {
 
                   const todayMid = toLocalMidnight(new Date());
 
-                  const upcoming = evs.events
+                  // Build upcoming list but prefer to promote any lectures happening today
+                  const allUpcoming = evs.events
                     .filter(e => e && (e.type === 'lecture' || e.type === 'class') && e.date)
                     .map(e => ({
                       id: e.id,
@@ -271,10 +304,40 @@ export default function UniversityOverview() {
                     .map(e => ({ ...e, _dateObj: toLocalMidnight(e.date) }))
                     .filter(e => e._dateObj && e._dateObj >= todayMid) // only today or future
                     .sort((a,b) => a._dateObj - b._dateObj)
-                    .slice(0,6)
-                    .map(({_dateObj, ...rest}) => rest);
+                    .slice(0,12) // fetch more so we can split into todays + rest
+                    .map(({_dateObj, ...rest}) => ({ ...rest, _dateObj }));
 
-                  setNextClasses(upcoming);
+                  // Split out items that are for today
+                  const todaysFromUpcoming = allUpcoming.filter(i => {
+                    try {
+                      if (!i._dateObj) return false;
+                      const y = i._dateObj.getFullYear();
+                      const m = i._dateObj.getMonth();
+                      const d = i._dateObj.getDate();
+                      const mid = new Date(y, m, d);
+                      return mid.getTime() === todayMid.getTime();
+                    } catch (e) { return false; }
+                  }).map(({_dateObj, ...rest}) => rest).slice(0,6);
+
+                  const upcomingRest = allUpcoming.filter(i => {
+                    try {
+                      if (!i._dateObj) return true;
+                      const y = i._dateObj.getFullYear();
+                      const m = i._dateObj.getMonth();
+                      const d = i._dateObj.getDate();
+                      const mid = new Date(y, m, d);
+                      return mid.getTime() !== todayMid.getTime();
+                    } catch (e) { return true; }
+                  }).map(({_dateObj, ...rest}) => rest).slice(0,6);
+
+                  // If we found any lectures for today in upcoming, promote them to Today's Classes
+                  if (todaysFromUpcoming.length) {
+                    // set todayList and nextClasses accordingly
+                    setTodayClasses(todaysFromUpcoming);
+                    setNextClasses(upcomingRest);
+                  } else {
+                    setNextClasses(upcomingRest);
+                  }
                 }
               } catch (e) { setNextClasses([]); }
             } else {

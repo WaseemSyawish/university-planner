@@ -203,6 +203,56 @@ export default async function handler(req, res) {
           // swallow extraction errors
         }
         if (out && out.date) out.date = localDateOnlyString(out.date);
+
+        // Compute deterministic ISO startDate and endDate fields so clients
+        // don't have to rely on parsing date-only strings (which can be
+        // interpreted as UTC or local depending on env) and thereby avoid
+        // timezone-induced off-by-one-day shifts for materialized repeats.
+        try {
+          // prefer explicit time if present
+          const dateVal = out.date || out.start_date || out.created_at || null;
+          if (dateVal) {
+            const dt = new Date(String(dateVal));
+            if (!isNaN(dt.getTime())) {
+              const y = dt.getFullYear();
+              const m = dt.getMonth();
+              const day = dt.getDate();
+              // time may be stored separately on the row as `time` or `startTime`
+              let hh = 0, mm = 0;
+              try {
+                const t = out.time || out.startTime || null;
+                if (t && typeof t === 'string' && t.indexOf(':') !== -1) {
+                  const parts = String(t).split(':').map(Number);
+                  hh = Number.isFinite(parts[0]) ? parts[0] : 0;
+                  mm = Number.isFinite(parts[1]) ? parts[1] : 0;
+                }
+              } catch (e) {}
+              // Build a UTC instant for the local y/m/d hh:mm
+              try {
+                const iso = new Date(Date.UTC(y, m, day, hh, mm, 0)).toISOString();
+                out.startDate = iso;
+              } catch (e) {
+                out.startDate = (new Date(String(dateVal))).toISOString();
+              }
+            }
+          }
+
+          // end_date may be present as a Date or ISO string; normalize to ISO when possible
+          if (out.end_date) {
+            try {
+              const ed = (Object.prototype.toString.call(out.end_date) === '[object Date]') ? out.end_date : new Date(String(out.end_date));
+              if (!isNaN(ed.getTime())) out.endDate = ed.toISOString();
+            } catch (e) {}
+          } else if (out.meta && out.meta.endDate) {
+            try {
+              const ed2 = new Date(String(out.meta.endDate));
+              if (!isNaN(ed2.getTime())) out.endDate = ed2.toISOString();
+            } catch (e) {}
+          }
+        } catch (e) {
+          // best-effort; don't let normalization break the API
+        }
+
         return out;
       });
       return res.status(200).json({ events: normalized });
