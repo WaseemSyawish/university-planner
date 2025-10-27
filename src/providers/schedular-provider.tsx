@@ -9,6 +9,13 @@ import React, {
   Dispatch,
   useEffect,
 } from "react";
+
+// Expose a global type for legacy callers that use window.__schedulerHandlers
+declare global {
+  interface Window {
+    __schedulerHandlers?: any;
+  }
+}
 import { z } from "zod";
 
 import {
@@ -39,6 +46,87 @@ export const variants = [
   "danger",
 ] as const;
 
+// Minimal normalization for incoming event objects so the rest of the app
+// can rely on common fields. This keeps the change local and low-risk.
+function normalizeEvent(ev: any) {
+  if (!ev || typeof ev !== 'object') return ev;
+  const clone: any = { ...ev };
+
+  // normalize color: prefer `color`, then `raw.color`, `raw.color_key`, or `color_key`.
+  // If value looks like a variant name, map it to a sensible color key.
+  const candidateColor =
+    clone.color ||
+    (clone.raw && (clone.raw.color || clone.raw.color_key || clone.raw.colorKey)) ||
+    clone.color_key ||
+    clone.colorKey ||
+    clone.variant ||
+    clone.type ||
+    null;
+
+  const variantToKey: Record<string, string> = {
+    primary: 'blue',
+    success: 'green',
+    warning: 'yellow',
+    danger: 'red',
+    default: 'gray',
+  };
+
+  if (candidateColor) {
+    // Normalize string forms: hex (#aabbcc), Tailwind-like classes (bg-blue-500),
+    // semantic classes (bg-primary) or simple keys ('blue').
+    if (typeof candidateColor === 'string') {
+      const raw = candidateColor.trim();
+      // hex
+      if (/^#/.test(raw)) {
+        clone.color = raw;
+      } else {
+        // remove leading 'bg-' if present
+        let s = raw.replace(/^bg-/, '');
+        // if it's a tailwind shade like 'blue-500', take the base color
+        const shadeMatch = s.match(/^([a-z]+)-\d{3,4}$/i);
+        if (shadeMatch) s = shadeMatch[1];
+
+        // map some common semantic names to canonical keys
+        const semanticMap: Record<string, string> = {
+          primary: 'blue',
+          secondary: 'slate',
+          accent: 'purple',
+          info: 'blue',
+          success: 'green',
+          warning: 'yellow',
+          error: 'red',
+          neutral: 'gray',
+        };
+
+        if (variantToKey[s]) {
+          clone.color = variantToKey[s];
+        } else if (semanticMap[s]) {
+          clone.color = semanticMap[s];
+        } else if (/^[a-z]+$/i.test(s)) {
+          // common color keyword like 'blue', 'red', etc.
+          clone.color = s.toLowerCase();
+        } else {
+          // last resort: keep original string
+          clone.color = raw;
+        }
+      }
+    } else {
+      // non-string candidate: keep as-is
+      clone.color = candidateColor;
+    }
+  }
+
+  // Normalize template id presence: server expects `template_id` for bulk ops
+  const templateId =
+    clone.template_id ||
+    clone.templateId ||
+    (clone.raw && (clone.raw.template_id || clone.raw.templateId)) ||
+    null;
+  if (templateId) clone.template_id = templateId;
+
+  return clone;
+}
+
 // Initial state
 const initialState: SchedulerState = {
   events: [],
@@ -56,7 +144,7 @@ const schedulerReducer = (
         return state;
       }
       if (state.events.some(e => e.id === action.payload.id)) return state;
-      return { ...state, events: [...state.events, action.payload] };
+      return { ...state, events: [...state.events, normalizeEvent(action.payload)] };
 
     case "REMOVE_EVENT":
       return {
@@ -67,7 +155,7 @@ const schedulerReducer = (
       return {
         ...state,
         events: state.events.map((event) =>
-          event.id === action.payload.id ? action.payload : event
+          event.id === action.payload.id ? normalizeEvent(action.payload) : event
         ),
       };
     case "SET_EVENTS":
@@ -79,7 +167,7 @@ const schedulerReducer = (
         if (seen.has(ev.id)) return false;
         seen.add(ev.id);
         return true;
-      });
+      }).map((ev: any) => normalizeEvent(ev));
       return { ...state, events: deduped };
 
     default:
@@ -103,7 +191,10 @@ export const SchedulerProvider = ({
   recurrenceOptions,
 }: {
   onAddEvent?: (event: Event) => void;
-  onUpdateEvent?: (event: Event) => void;
+  // onUpdateEvent may accept an optional scope parameter when callers want to
+  // indicate whether the change should apply to a single occurrence, future
+  // occurrences, or the whole series.
+  onUpdateEvent?: (event: Event, scope?: string) => void;
   onDeleteEvent?: (id: string) => void;
   weekStartsOn?: startOfWeek;
   children: ReactNode;
@@ -331,12 +422,12 @@ export const SchedulerProvider = ({
     return event;
   }
 
-  async function handleUpdateEvent(event: Event, id: string) {
+  async function handleUpdateEvent(event: Event, id: string, scope?: string) {
     // Prefer to let the parent persist the change and return the canonical
     // event; only then update local state with the authoritative values.
     if (onUpdateEvent) {
       try {
-        const res: any = await onUpdateEvent({ ...event, id });
+        const res: any = await onUpdateEvent({ ...event, id }, scope);
         if (res && res.id) {
           try { dispatch({ type: "UPDATE_EVENT", payload: res }); } catch (e) {}
         }
@@ -359,17 +450,247 @@ export const SchedulerProvider = ({
     return { ...event, id };
   }
 
-  function handleDeleteEvent(id: string) {
-    if (onDeleteEvent) {
+  // scope-aware delete handler. If scope === 'all' attempts a server-side
+  // bulk delete (DELETE /api/events/{id}?scope=all) and then refreshes the
+  // provider state by loading current events from the server. When scope
+  // is omitted or 'single', behavior is unchanged (call parent handler or
+  // remove locally).
+  async function handleDeleteEvent(id: string, scope?: string) {
+  console.log(`[SchedulerProvider] handleDeleteEvent called: id=${id}, scope=${scope}`);
+  
+  try {
+    if (scope === 'all') {
+      // Discover template_id locally to pass to server
+      let discoveredTplId: string | null = null;
+      let eventToDelete: any = null;
+      
       try {
-        const maybe: any = onDeleteEvent(id);
-        return maybe;
+        const events = (state && state.events) ? state.events : [];
+        eventToDelete = events.find((ev: any) => String(ev.id) === String(id)) || null;
+        
+        console.log('[SchedulerProvider] Event found in state:', eventToDelete);
+        console.log('[SchedulerProvider] All events:', events.map((e: any) => ({ 
+          id: e.id, 
+          title: e.title, 
+          template_id: e.template_id 
+        })));
+        
+        if (eventToDelete) {
+          // Cast to any to access properties that might not be in type definition
+          const evt = eventToDelete as any;
+          
+          discoveredTplId = 
+            evt.template_id || 
+            evt.templateId ||
+            (evt.raw && (evt.raw.template_id || evt.raw.templateId)) || 
+            null;
+          
+          console.log('[SchedulerProvider] Discovered template_id:', discoveredTplId);
+          console.log('[SchedulerProvider] Full event object:', JSON.stringify(eventToDelete, null, 2));
+        } else {
+          console.warn('[SchedulerProvider] Event not found in state for id:', id);
+        }
       } catch (e) {
-        // fall back to local remove
+        console.warn('[SchedulerProvider] Failed to discover template_id:', e);
+      }
+      
+      console.log(`[SchedulerProvider] Attempting bulk delete with template_id=${discoveredTplId}`);
+      
+      // Call server-side bulk delete
+      try {
+        const queryParams = new URLSearchParams({ scope: 'all' });
+        if (discoveredTplId) {
+          queryParams.append('templateId', discoveredTplId);
+        } else {
+          // If no template_id discovered, try to provide repeatOption to help server
+          // identify series materialized without template linkage.
+          try {
+            const evt: any = eventToDelete || null;
+            const repeatOption = evt && (evt.repeatOption || (evt.raw && (evt.raw.repeatOption || evt.raw.repeat_option))) || null;
+            if (repeatOption) queryParams.append('repeatOption', String(repeatOption));
+          } catch (e) { /* ignore */ }
+        }
+
+        const url = `/api/events/${encodeURIComponent(id)}?${queryParams.toString()}`;
+        console.log(`[SchedulerProvider] DELETE request: ${url}`);
+        
+        const res = await fetch(url, { 
+          method: 'DELETE',
+          headers: { 'Content-Type': 'application/json' }
+        });
+        
+        const responseData = await res.json().catch(() => ({}));
+        console.log('[SchedulerProvider] DELETE response:', { 
+          ok: res.ok, 
+          status: res.status, 
+          data: responseData 
+        });
+        
+        if (!res.ok) {
+          // If the server indicates the event is not part of a series (missing template),
+          // perform a single-event delete fallback rather than throwing immediately.
+          const code = responseData && responseData.code ? responseData.code : null;
+          const msg = responseData && responseData.message ? String(responseData.message).toLowerCase() : '';
+          if (code === 'NO_TEMPLATE' || msg.includes('not part of') || msg.includes('template_id is missing') || msg.includes('template id is missing')) {
+            console.warn('[SchedulerProvider] Server returned NO_TEMPLATE or missing template; attempting single-delete fallback for id=', id);
+            try {
+              const singleRes = await fetch(`/api/events/${encodeURIComponent(id)}`, { method: 'DELETE' });
+              if (singleRes && singleRes.ok) {
+                // refresh events if possible
+                try {
+                  const listRes = await fetch('/api/events');
+                  if (listRes && listRes.ok) {
+                    const body = await listRes.json().catch(() => null);
+                    const eventsList = Array.isArray(body?.events) ? body.events : (Array.isArray(body) ? body : []);
+                    dispatch({ type: 'SET_EVENTS', payload: eventsList });
+                    return { success: true, deleted: true, count: 1 };
+                  }
+                } catch (e) {
+                  // Fall through to local remove
+                }
+                // If refresh failed, remove locally
+                dispatch({ type: 'REMOVE_EVENT', payload: { id } });
+                return { success: true, deleted: true, count: 1 };
+              }
+            } catch (e) {
+              console.warn('[SchedulerProvider] single-delete fallback request failed', e);
+            }
+            // If fallback didn't succeed, allow error to be thrown below
+          }
+          throw new Error(responseData.message || `Delete failed with status ${res.status}`);
+        }
+        
+        // Success - refresh events from server
+        console.log('[SchedulerProvider] Bulk delete successful, refreshing events...');
+        
+        try {
+          const listRes = await fetch('/api/events');
+          if (listRes && listRes.ok) {
+            const body = await listRes.json().catch(() => null);
+            const eventsList = Array.isArray(body?.events) ? body.events : (Array.isArray(body) ? body : []);
+            
+            console.log(`[SchedulerProvider] Loaded ${eventsList.length} events after bulk delete`);
+            dispatch({ type: 'SET_EVENTS', payload: eventsList });
+            
+            return { 
+              success: true, 
+              deleted: true, 
+              count: responseData.deletedCount || responseData.details?.total || 0 
+            };
+          }
+        } catch (refreshErr) {
+          console.warn('[SchedulerProvider] Failed to refresh events after bulk delete:', refreshErr);
+          
+          // Fallback: remove events with matching template_id from local state
+          if (discoveredTplId) {
+            const events = (state && state.events) ? state.events : [];
+            const filtered = events.filter((ev: any) => {
+              const evTpl = 
+                ev.template_id || 
+                ev.templateId ||
+                (ev.raw && (ev.raw.template_id || ev.raw.templateId)) || 
+                null;
+              return !evTpl || String(evTpl) !== String(discoveredTplId);
+            });
+            
+            console.log(`[SchedulerProvider] Filtered ${events.length - filtered.length} events locally`);
+            dispatch({ type: 'SET_EVENTS', payload: filtered });
+          }
+        }
+        
+        return { success: true, deleted: true };
+        
+      } catch (deleteErr: any) {
+        console.error('[SchedulerProvider] Bulk delete failed:', deleteErr);
+        
+        // If server delete failed, try client-side fallback
+        if (discoveredTplId) {
+          console.log('[SchedulerProvider] Attempting client-side bulk delete fallback...');
+          
+          try {
+            // Fetch all events
+            const listRes = await fetch('/api/events');
+            if (listRes && listRes.ok) {
+              const body = await listRes.json().catch(() => null);
+              const eventsList = Array.isArray(body?.events) ? body.events : (Array.isArray(body) ? body : []);
+              
+              // Find all events with matching template_id
+              const toDelete = eventsList.filter((ev: any) => {
+                const evTpl = 
+                  ev.template_id || 
+                  ev.templateId ||
+                  (ev.raw && (ev.raw.template_id || ev.raw.templateId)) || 
+                  null;
+                return evTpl && String(evTpl) === String(discoveredTplId);
+              });
+              
+              console.log(`[SchedulerProvider] Found ${toDelete.length} events to delete`);
+              
+              // Delete each event individually
+              let deletedCount = 0;
+              for (const ev of toDelete) {
+                try {
+                  const delRes = await fetch(`/api/events/${encodeURIComponent(ev.id)}`, { 
+                    method: 'DELETE' 
+                  });
+                  if (delRes.ok) deletedCount++;
+                } catch (e) {
+                  console.warn(`[SchedulerProvider] Failed to delete event ${ev.id}:`, e);
+                }
+              }
+              
+              console.log(`[SchedulerProvider] Deleted ${deletedCount}/${toDelete.length} events`);
+              
+              // Refresh events list
+              const refreshRes = await fetch('/api/events');
+              if (refreshRes && refreshRes.ok) {
+                const refreshBody = await refreshRes.json().catch(() => null);
+                const refreshedEvents = Array.isArray(refreshBody?.events) ? refreshBody.events : (Array.isArray(refreshBody) ? refreshBody : []);
+                dispatch({ type: 'SET_EVENTS', payload: refreshedEvents });
+                
+                return { success: true, deleted: true, count: deletedCount };
+              }
+            }
+          } catch (fallbackErr) {
+            console.error('[SchedulerProvider] Client-side fallback failed:', fallbackErr);
+          }
+        }
+        
+        // Last resort: remove locally
+        console.log('[SchedulerProvider] Removing event locally as last resort');
+        dispatch({ type: 'REMOVE_EVENT', payload: { id } });
+        
+        throw deleteErr;
       }
     }
+    
+    // Single delete (scope !== 'all')
+    if (onDeleteEvent) {
+      try {
+        const result: any = await onDeleteEvent(id);
+        dispatch({ type: "REMOVE_EVENT", payload: { id } });
+        return result;
+      } catch (e) {
+        console.warn('[SchedulerProvider] onDeleteEvent handler failed:', e);
+        dispatch({ type: "REMOVE_EVENT", payload: { id } });
+        throw e;
+      }
+    }
+    
     dispatch({ type: "REMOVE_EVENT", payload: { id } });
+    return { success: true };
+    
+  } catch (err) {
+    console.error('[SchedulerProvider] handleDeleteEvent error:', err);
+    
+    // Remove locally as last resort
+    try {
+      dispatch({ type: "REMOVE_EVENT", payload: { id } });
+    } catch (e) {}
+    
+    return { success: false, error: err };
   }
+}
 
   // Local-only handlers: allow callers to update provider state without delegating
   // persistence to parent page handlers. Useful when the caller performs the
@@ -413,6 +734,30 @@ export const SchedulerProvider = ({
     handleLocalAddEvent,
     handleLocalUpdateEvent,
   };
+
+  // Expose a global shortcut so non-context callers (legacy code paths)
+  // can delegate to the provider's handlers via window.__schedulerHandlers.
+  // This keeps backward compatibility with components that reference that
+  // global instead of using the context hook.
+  React.useEffect(() => {
+    try {
+      if (typeof window !== 'undefined') {
+        // assign a shallow copy to avoid external mutation of our handlers
+        // eslint-disable-next-line @typescript-eslint/ban-ts-comment
+        // @ts-ignore
+        window.__schedulerHandlers = handlers;
+      }
+    } catch (e) {}
+    return () => {
+      try {
+        if (typeof window !== 'undefined' && window.__schedulerHandlers) {
+          // eslint-disable-next-line @typescript-eslint/ban-ts-comment
+          // @ts-ignore
+          delete window.__schedulerHandlers;
+        }
+      } catch (e) {}
+    };
+  }, [handlers]);
 
   return (
     <SchedulerContext.Provider

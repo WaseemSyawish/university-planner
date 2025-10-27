@@ -2,6 +2,7 @@
 import Head from 'next/head'
 import React, { useEffect, useState } from 'react'
 import dynamic from 'next/dynamic'
+import EditScopeModal from '@/components/Timetable/EditScopeModal';
 
 function mapToSchedulerEvents(list) {
   if (!Array.isArray(list)) return []
@@ -18,7 +19,7 @@ function mapToSchedulerEvents(list) {
     } catch (err) {
       start = new Date()
     }
-    
+
     let desc = e.description || e.notes || '';
     let color = null;
     let variant = null;
@@ -32,13 +33,13 @@ function mapToSchedulerEvents(list) {
         if (parsed && parsed.durationMinutes) parsedDuration = Number(parsed.durationMinutes);
         desc = String(desc).replace(metaMatch[0], '').trim();
       }
-    } catch (err) {}
+    } catch (err) { }
 
     try {
       if ((e && e.meta && typeof e.meta.durationMinutes !== 'undefined') && (parsedDuration === null || typeof parsedDuration === 'undefined')) {
         parsedDuration = Number(e.meta.durationMinutes);
       }
-    } catch (err) {}
+    } catch (err) { }
 
     const durationMinutesRaw = parsedDuration ?? e.durationMinutes ?? e.duration;
     const durationMinutes = (typeof durationMinutesRaw !== 'undefined' && durationMinutesRaw !== null) ? Number(durationMinutesRaw) : null;
@@ -78,8 +79,8 @@ function mapToSchedulerEvents(list) {
         durationMinutes,
         raw: e
       })
-    } catch (inner) {}
-    
+    } catch (inner) { }
+
     return {
       id: String(e.id ?? `tmp-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`),
       title: e.title || e.subject || 'Event',
@@ -115,35 +116,38 @@ export default function TimetablePage() {
   const [quickColor, setQuickColor] = useState(null)
   const [creatingQuick, setCreatingQuick] = useState(false)
   const quickRef = React.useRef(null)
+  const [showDeleteScope, setShowDeleteScope] = useState(false)
+  const [pendingDeleteId, setPendingDeleteId] = useState(null)
+  const [pendingDeleteEvent, setPendingDeleteEvent] = useState(null)
 
   useEffect(() => {
     let mounted = true
 
-    ;(async () => {
-      try {
-        const res = await fetch('/api/events')
-        if (!res.ok) throw new Error('failed to load events')
-        const payload = await res.json()
-        const list = Array.isArray(payload?.events) ? payload.events : (Array.isArray(payload) ? payload : [])
-        if (!mounted) return
-        setEvents(mapToSchedulerEvents(list))
-        
+      ; (async () => {
         try {
-          const ro = await fetch('/api/recurrence-options')
-          if (ro.ok) {
-            const j = await ro.json()
-            if (j && Array.isArray(j.options)) setRecurrenceOptions(j.options)
+          const res = await fetch('/api/events')
+          if (!res.ok) throw new Error('failed to load events')
+          const payload = await res.json()
+          const list = Array.isArray(payload?.events) ? payload.events : (Array.isArray(payload) ? payload : [])
+          if (!mounted) return
+          setEvents(mapToSchedulerEvents(list))
+
+          try {
+            const ro = await fetch('/api/recurrence-options')
+            if (ro.ok) {
+              const j = await ro.json()
+              if (j && Array.isArray(j.options)) setRecurrenceOptions(j.options)
+            }
+          } catch (e) {
+            console.warn('Failed to load recurrence options', e)
           }
-        } catch (e) {
-          console.warn('Failed to load recurrence options', e)
+        } catch (err) {
+          console.warn('Failed to load events for timetable', err)
+          if (mounted) setEvents([])
+        } finally {
+          if (mounted) setLoading(false)
         }
-      } catch (err) {
-        console.warn('Failed to load events for timetable', err)
-        if (mounted) setEvents([])
-      } finally {
-        if (mounted) setLoading(false)
-      }
-    })()
+      })()
 
     return () => {
       mounted = false
@@ -225,13 +229,13 @@ export default function TimetablePage() {
         ...(event && event.type ? { type: event.type } : {}),
         ...(event && event.color ? { color: event.color } : {}),
       };
-      try { console.info('[timetable] creating event - body preview:', JSON.stringify({ startDate: body.startDate, endDate: body.endDate, durationMinutes: body.durationMinutes, date: body.date, time: body.time, title: body.title }).slice(0,2000)); } catch (e) {}
+      try { console.info('[timetable] creating event - body preview:', JSON.stringify({ startDate: body.startDate, endDate: body.endDate, durationMinutes: body.durationMinutes, date: body.date, time: body.time, title: body.title }).slice(0, 2000)); } catch (e) { }
       if (Object.keys(meta).length > 0) body.meta = meta;
       if (event && event.recurrence && event.recurrence.id) body.repeatOption = event.recurrence.id;
       if (typeof process !== 'undefined' && process.env && process.env.NODE_ENV === 'development') {
         body.userId = 'smoke_user';
       }
-      
+
       const res = await fetch('/api/events', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
       const text = await res.text()
       if (!res.ok) {
@@ -239,9 +243,9 @@ export default function TimetablePage() {
         try {
           const parsed = JSON.parse(text)
           msg = parsed?.error || parsed?.message || JSON.stringify(parsed)
-        } catch (e) {}
+        } catch (e) { }
         const err = new Error(msg || `POST /api/events failed with ${res.status}`)
-        ;(err).status = res.status
+          ; (err).status = res.status
         throw err
       }
 
@@ -257,7 +261,7 @@ export default function TimetablePage() {
     }
   }
 
-  async function handleUpdateEvent(event) {
+  async function handleUpdateEvent(event, scope = 'single') {
     try {
       const id = event.id
       if (!id) {
@@ -294,11 +298,63 @@ export default function TimetablePage() {
         endDate: end instanceof Date ? end.toISOString() : end,
         raw: event.raw ?? null,
       };
+      // If this update should apply to the whole series/template, prefer updating the template
+      // If event.raw contains a template id, use the timetable API to update the template when scope==='all'
+      try {
+        const tplId = event && event.raw && (event.raw.template_id || event.raw.templateId) ? (event.raw.template_id || event.raw.templateId) : null;
+        if (scope === 'all' && tplId) {
+          // Build a template-like payload. Keep minimal fields; server-side template PUT will merge.
+          const tplBody = {
+            title: body.title,
+            description: body.description,
+            repeatOption: event.repeatOption || (event.raw && event.raw.repeatOption) || null,
+            meta: event.meta || (event.raw && event.raw.meta) || null,
+          };
+          const resTpl = await fetch(`/api/timetable/${encodeURIComponent(tplId)}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(tplBody) });
+          if (!resTpl.ok) {
+            const txt = await resTpl.text().catch(() => null);
+            throw new Error(`Template update failed ${resTpl.status}: ${txt}`);
+          }
+          await reloadEvents();
+          return null;
+        }
+      } catch (e) {
+        console.warn('Failed to update template for all-scope edit, falling back to per-event update', e);
+      }
+
+      // For 'future' scope: update all materialized events with same template_id and date >= base date
+      if (scope === 'future') {
+        try {
+          const tplId = event && event.raw && (event.raw.template_id || event.raw.templateId) ? (event.raw.template_id || event.raw.templateId) : null;
+          if (tplId) {
+            const list = await fetch('/api/events').then(r => r.ok ? r.json().catch(() => null) : null);
+            const eventsList = Array.isArray(list?.events) ? list.events : (Array.isArray(list) ? list : []);
+            const baseDate = new Date(event.date || (event.raw && event.raw.date) || event.startDate || null);
+            const toPatch = eventsList.filter(ev => {
+              const evTpl = ev && (ev.template_id || (ev.raw && (ev.raw.template_id || ev.raw.templateId))) || null;
+              if (!evTpl || String(evTpl) !== String(tplId)) return false;
+              try {
+                const evDate = new Date(ev.date || ev.startDate || ev.start_date || ev.startDate);
+                return evDate >= baseDate;
+              } catch (e) { return false; }
+            });
+            for (const ev of toPatch) {
+              try {
+                await fetch(`/api/events/${encodeURIComponent(ev.id)}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+              } catch (e) { console.warn('Failed patching event in future-scope', ev && ev.id, e); }
+            }
+            await reloadEvents();
+            return null;
+          }
+        } catch (e) {
+          console.warn('Future-scope bulk update failed, falling back to single update', e);
+        }
+      }
       if (event && event.recurrence && event.recurrence.id) body.repeatOption = event.recurrence.id;
       if (typeof process !== 'undefined' && process.env && process.env.NODE_ENV === 'development') {
         body.userId = 'smoke_user';
       }
-      
+
       const res = await fetch(`/api/events/${encodeURIComponent(id)}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
       const text = await res.text();
       if (!res.ok) {
@@ -317,9 +373,32 @@ export default function TimetablePage() {
     }
   }
 
-  async function handleDeleteEvent(id) {
+  async function handleDeleteEvent(evOrId) {
     try {
+      if (!evOrId) return
+      // Accept either an event object or an id string
+      const passedEvent = (typeof evOrId === 'object' && evOrId) ? evOrId : null
+      const id = passedEvent ? passedEvent.id : evOrId
       if (!id) return
+
+      // Find the event in the current client cache to see if it's part of a series
+      const ev = passedEvent || events.find((e) => String(e.id) === String(id)) || null
+      const tplId = ev && ((ev.raw && (ev.raw.template_id || ev.raw.templateId)) || ev.template_id || ev.templateId) || null
+      // Fallback: treat timetable-derived ids ('tt-...') as series because they often come from timetable templates
+      const isTimetableId = String(id || '').startsWith('tt-')
+      const isSeries = !!(ev && (ev.recurrence || ev.repeatOption || tplId)) || isTimetableId
+
+      // Debugging: make it obvious in console when we detect a series
+      try { console.debug('[timetable] handleDeleteEvent', { id, tplId, repeatOption: ev && ev.repeatOption, isTimetableId, ev }); } catch (e) {}
+
+      if (isSeries) {
+        // store pending id and event object (if available) and show delete-scope chooser
+        setPendingDeleteId(id)
+        setPendingDeleteEvent(ev || null)
+        setShowDeleteScope(true)
+        return
+      }
+
       await fetch(`/api/events/${encodeURIComponent(id)}`, { method: 'DELETE' })
       await reloadEvents()
     } catch (err) {
@@ -438,7 +517,7 @@ export default function TimetablePage() {
           background: #475569;
         }
       `}</style>
-      
+
       <Head>
         <title>Timetable — University Planner</title>
       </Head>
@@ -456,10 +535,10 @@ export default function TimetablePage() {
               <p className="text-xs text-gray-500 dark:text-slate-400">Manage your schedule</p>
             </div>
           </div>
-          
+
           <div className="relative" ref={quickRef}>
-            <button 
-              onClick={() => setQuickOpen((s) => !s)} 
+            <button
+              onClick={() => setQuickOpen((s) => !s)}
               className="px-5 py-2.5 bg-gradient-to-r from-purple-600 to-purple-700 hover:from-purple-500 hover:to-purple-600 text-white rounded-lg text-sm font-medium transition-all duration-200 hover:shadow-lg hover:shadow-purple-500/40 flex items-center gap-2"
             >
               <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -474,15 +553,15 @@ export default function TimetablePage() {
                   <button onClick={() => setQuickOpen(false)} className="text-xs text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 transition-colors">Close</button>
                 </div>
                 <div className="flex flex-col gap-3">
-                  <input 
-                    value={quickTitle} 
-                    onChange={(e) => setQuickTitle(e.target.value)} 
-                    placeholder="Event title" 
-                    className="w-full px-3 py-2 border border-gray-300 dark:border-slate-600 rounded-lg text-sm bg-white dark:bg-slate-900 text-gray-900 dark:text-white focus:ring-2 focus:ring-purple-500 dark:focus:ring-purple-400 focus:border-transparent transition-all" 
+                  <input
+                    value={quickTitle}
+                    onChange={(e) => setQuickTitle(e.target.value)}
+                    placeholder="Event title"
+                    className="w-full px-3 py-2 border border-gray-300 dark:border-slate-600 rounded-lg text-sm bg-white dark:bg-slate-900 text-gray-900 dark:text-white focus:ring-2 focus:ring-purple-500 dark:focus:ring-purple-400 focus:border-transparent transition-all"
                   />
-                  <select 
-                    value={quickType} 
-                    onChange={(e) => setQuickType(e.target.value)} 
+                  <select
+                    value={quickType}
+                    onChange={(e) => setQuickType(e.target.value)}
                     className="w-full px-3 py-2 border border-gray-300 dark:border-slate-600 rounded-lg text-sm bg-white dark:bg-slate-900 text-gray-900 dark:text-white focus:ring-2 focus:ring-purple-500 dark:focus:ring-purple-400 focus:border-transparent transition-all"
                   >
                     <option value="lecture">Lecture</option>
@@ -492,28 +571,27 @@ export default function TimetablePage() {
                   </select>
                   <div className="flex items-center gap-3">
                     <div className="text-xs font-medium text-gray-600 dark:text-slate-300">Color:</div>
-                    {['blue','red','green','yellow'].map(c => (
-                      <button 
-                        key={c} 
-                        onClick={() => setQuickColor(c)} 
-                        className={`w-7 h-7 rounded-lg transition-all ${
-                          c === 'blue' ? 'bg-blue-500' : 
-                          c === 'red' ? 'bg-red-500' : 
-                          c === 'green' ? 'bg-green-500' : 
-                          'bg-yellow-500'
-                        } ${quickColor===c ? 'ring-2 ring-offset-2 dark:ring-offset-slate-800 ring-purple-500 scale-110' : 'hover:scale-105'}`} 
+                    {['blue', 'red', 'green', 'yellow'].map(c => (
+                      <button
+                        key={c}
+                        onClick={() => setQuickColor(c)}
+                        className={`w-7 h-7 rounded-lg transition-all ${c === 'blue' ? 'bg-blue-500' :
+                            c === 'red' ? 'bg-red-500' :
+                              c === 'green' ? 'bg-green-500' :
+                                'bg-yellow-500'
+                          } ${quickColor === c ? 'ring-2 ring-offset-2 dark:ring-offset-slate-800 ring-purple-500 scale-110' : 'hover:scale-105'}`}
                       />
                     ))}
                   </div>
                   <div className="flex items-center gap-2 justify-end pt-2">
-                    <button 
-                      onClick={() => { setQuickOpen(false); setQuickTitle(''); setQuickType('lecture'); setQuickColor(null); }} 
+                    <button
+                      onClick={() => { setQuickOpen(false); setQuickTitle(''); setQuickType('lecture'); setQuickColor(null); }}
                       className="px-4 py-2 text-sm border border-gray-300 dark:border-slate-600 rounded-lg text-gray-700 dark:text-slate-300 hover:bg-gray-50 dark:hover:bg-slate-700 transition-all"
                     >
                       Cancel
                     </button>
-                    <button 
-                      disabled={creatingQuick} 
+                    <button
+                      disabled={creatingQuick}
                       onClick={async () => {
                         try {
                           setCreatingQuick(true);
@@ -522,7 +600,7 @@ export default function TimetablePage() {
                             title: quickTitle && quickTitle.trim() ? quickTitle.trim() : (quickType.charAt(0).toUpperCase() + quickType.slice(1)),
                             description: null,
                             startDate: now,
-                            endDate: new Date(now.getTime() + 60*60*1000),
+                            endDate: new Date(now.getTime() + 60 * 60 * 1000),
                             type: quickType,
                             color: quickColor
                           };
@@ -535,7 +613,7 @@ export default function TimetablePage() {
                         } finally {
                           setCreatingQuick(false);
                         }
-                      }} 
+                      }}
                       className="px-4 py-2 text-sm bg-purple-600 text-white rounded-lg disabled:opacity-50 hover:bg-purple-700 transition-all shadow-sm hover:shadow-md"
                     >
                       {creatingQuick ? 'Creating...' : 'Create'}
@@ -570,6 +648,87 @@ export default function TimetablePage() {
                 <SchedularViewComp initialView={appDefaultView} events={events} views={{ views: ['day', 'week', 'month'], mobileViews: ['day'] }} />
               </div>
             </SchedulerProviderComp>
+            {/* Scope modal used when deleting a recurring event from timetable */}
+            <EditScopeModal
+              visible={showDeleteScope}
+              mode={'delete'}
+              onClose={() => { setShowDeleteScope(false); setPendingDeleteId(null); }}
+              onConfirm={async (scope) => {
+                try {
+                  setShowDeleteScope(false)
+                  const rawId = pendingDeleteId
+                  const pendingEv = pendingDeleteEvent
+                  setPendingDeleteId(null)
+                  setPendingDeleteEvent(null)
+                  if (!rawId && !pendingEv) return
+                  const id = (pendingEv && pendingEv.id) ? pendingEv.id : rawId
+                  if (!id) return
+
+                  // Single-instance delete
+                  if (scope === 'single') {
+                    try {
+                      await fetch(`/api/events/${encodeURIComponent(id)}`, { method: 'DELETE' })
+                    } catch (e) { console.warn('Single delete failed', e) }
+                    await reloadEvents()
+                    return
+                  }
+
+                  // 'all' -> try provider handler, then server bulk-delete, then best-effort fallback
+                  try {
+                    const schedulerHandlers = window.__schedulerHandlers;
+                    if (typeof schedulerHandlers?.handleDeleteEvent === 'function') {
+                      await schedulerHandlers.handleDeleteEvent(id, 'all')
+                      await reloadEvents()
+                      return
+                    }
+                    // try server-side bulk delete endpoint (include templateId when we have the pending event)
+                    try {
+                      const evAny = pendingEv || null;
+                      const tplId = evAny && (evAny.raw && (evAny.raw.template_id || evAny.raw.templateId) || evAny.template_id || evAny.templateId) ? (evAny.raw && (evAny.raw.template_id || evAny.raw.templateId) || evAny.template_id || evAny.templateId) : null;
+                      const url = `/api/events/${encodeURIComponent(id)}?scope=all${tplId ? `&templateId=${encodeURIComponent(tplId)}` : ''}`;
+                      await fetch(url, { method: 'DELETE' })
+                      await reloadEvents()
+                      return
+                    } catch (e) {
+                      console.warn('Fallback bulk delete failed', e)
+                    }
+                  } catch (e) {
+                    console.warn('Bulk delete flow failed', e)
+                  }
+
+                  // Final best-effort: match by title/time using pendingEv
+                  try {
+                    const list = await fetch('/api/events').then(r => r.ok ? r.json().catch(() => null) : null)
+                    const eventsList = Array.isArray(list?.events) ? list.events : (Array.isArray(list) ? list : [])
+                    const candidateTitle = pendingEv && pendingEv.title ? pendingEv.title : null
+                    const candidateTime = pendingEv && pendingEv.raw && (pendingEv.raw.time || pendingEv.raw.startTime || pendingEv.raw.start_time) ? pendingEv.raw.time || pendingEv.raw.startTime || pendingEv.raw.start_time : null
+                    const matches = eventsList.filter(ev => {
+                      try {
+                        if (!candidateTitle) return false
+                        const sameTitle = String(ev.title || ev.subject || '').trim() === String(candidateTitle).trim()
+                        if (!sameTitle) return false
+                        if (candidateTime) {
+                          const evTime = ev.time || ev.startTime || ev.start_time || (ev.raw && (ev.raw.time || ev.raw.startTime || ev.raw.start_time)) || null
+                          if (evTime && String(evTime) !== String(candidateTime)) return false
+                        }
+                        return true
+                      } catch (e) { return false }
+                    })
+                    for (const ev of matches) {
+                      try { await fetch(`/api/events/${encodeURIComponent(ev.id)}`, { method: 'DELETE' }) } catch (e) { console.warn('Best-effort delete failed for', ev && ev.id, e) }
+                    }
+                    await reloadEvents()
+                    return
+                  } catch (e) {
+                    console.warn('Fallback series delete failed', e)
+                  }
+
+                  await reloadEvents()
+                } catch (e) {
+                  console.warn('EditScopeModal onConfirm error', e)
+                }
+              }}
+            />
           </div>
         ) : (
           <div className="bg-white dark:bg-slate-900 rounded-2xl border border-gray-200 dark:border-slate-800 p-8 shadow-lg">
@@ -582,7 +741,7 @@ export default function TimetablePage() {
               <h3 className="text-xl font-semibold text-gray-900 dark:text-white mb-2">Scheduler Unavailable</h3>
               <p className="text-gray-600 dark:text-slate-400">Displaying events in list view</p>
             </div>
-            
+
             {events.length === 0 ? (
               <div className="text-center py-12">
                 <p className="text-gray-500 dark:text-slate-400">No events scheduled</p>

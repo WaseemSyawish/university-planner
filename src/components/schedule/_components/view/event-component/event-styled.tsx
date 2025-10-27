@@ -5,14 +5,18 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { useModal } from "@/providers/modal-context";
 import AddEventModal from "@/components/schedule/_modals/add-event-modal";
+import EditScopeModal from "@/components/Timetable/EditScopeModal";
 import { Event, CustomEventModal } from "@/types";
 import { TrashIcon, CalendarIcon, ClockIcon } from "@/components/icons/simple-icons";
 import { useScheduler } from "@/providers/schedular-provider";
 import { cn } from "@/lib/utils";
 import CustomModal from "@/components/ui/custom-modal";
 
-const formatTime = (date: Date) => {
-  return date.toLocaleString("en-US", {
+const formatTime = (date: any) => {
+  if (!date) return "";
+  const d = date instanceof Date ? date : new Date(String(date));
+  if (isNaN(d.getTime())) return "";
+  return d.toLocaleString("en-US", {
     hour: "numeric",
     minute: "numeric",
     hour12: true,
@@ -66,65 +70,61 @@ const hexToRgb = (hex: string) => {
   return null;
 };
 
-interface EventStyledProps extends Event {
-  minmized?: boolean;
-  compact?: boolean;
-  CustomEventComponent?: React.FC<Event>;
-  meta?: any;
-  collapsed?: boolean;
+interface EventStyledProps {
+  event: Event;
+  onDelete?: (id?: string) => void;
+  CustomEventModal?: CustomEventModal;
 }
 
-export default function EventStyled({
-  event,
-  onDelete,
-  CustomEventModal,
-}: {
-  event: EventStyledProps;
-  CustomEventModal?: CustomEventModal;
-  onDelete?: (id: string) => void;
-}) {
+export default function EventStyled({ event, onDelete, CustomEventModal }: EventStyledProps) {
   const { setOpen } = useModal();
   const { handlers } = useScheduler();
-  const deleteBtnRef = useRef<HTMLButtonElement>(null);
-
-  function handleEditEvent(event: Event) {
-    setOpen(
-      <CustomModal title="Edit Event">
-        <AddEventModal
-          CustomAddEventModal={
-            CustomEventModal?.CustomAddEventModal?.CustomForm
-          }
-        />
-      </CustomModal>,
-      async () => {
-        return {
-          ...event,
-        };
-      }
-    );
-  }
-
-  const isHex = (s) => typeof s === 'string' && /^#([0-9A-F]{3}){1,2}$/i.test(s);
-  const resolvedColorValue = (event?.meta?.color) || event?.color;
-
+  const deleteBtnRef = useRef<HTMLButtonElement | null>(null);
+  const [showDeleteScope, setShowDeleteScope] = useState(false);
   const [isDark, setIsDark] = useState(false);
+  const [resolvedColorValue, setResolvedColorValue] = useState<any>(null);
+  const isHex = (s: string) => /^#([A-Fa-f0-9]{6}|[A-Fa-f0-9]{3})$/.test(s);
 
+  // Ensure we resolve the color for rendering (accept hex, color key, or variant)
   useEffect(() => {
     try {
-      const mq = typeof window !== 'undefined' && window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)');
-      const prefersDark = mq && mq.matches;
-      const htmlHasDark = typeof document !== 'undefined' && document.documentElement.classList.contains('dark');
-      setIsDark(!!(htmlHasDark || prefersDark));
-    } catch (e) {}
-  }, []);
+      const evAny: any = event || {};
+      // Prefer explicit color, then raw color, then variant/color key
+      const candidate = evAny.color || (evAny.raw && (evAny.raw.color || evAny.raw.colorKey || evAny.raw.color_key)) || evAny.variant || evAny.type || null;
+      setResolvedColorValue(candidate ?? null);
+    } catch (e) {
+      setResolvedColorValue(null);
+    }
 
-  // Force delete button styles with !important via CSSOM
+    // detect dark mode class on root element so color mapping can adapt
+    try {
+      const dark = typeof document !== 'undefined' && document.documentElement.classList.contains('dark');
+      setIsDark(!!dark);
+    } catch (e) {}
+  }, [event]);
+
+  // Open the edit modal with the provided event object so the modal can
+  // access server-authoritative fields (template_id/raw) for delete/update
+  // operations. This mirrors usages elsewhere in the codebase.
+  function handleEditEvent(ev: any) {
+    try {
+      setOpen(
+        <CustomModal title={ev?.title ? `Edit: ${String(ev.title).slice(0, 60)}` : "Edit Event"}>
+          <AddEventModal CustomAddEventModal={CustomEventModal?.CustomAddEventModal?.CustomForm} />
+        </CustomModal>,
+        async () => ({ default: ev })
+      );
+    } catch (e) {
+      console.warn("Failed to open edit modal", e);
+    }
+  }
+
   useEffect(() => {
     const btn = deleteBtnRef.current;
     if (!btn) return;
-    
+
     const svg = btn.querySelector('svg');
-    
+
     // Set styles with !important priority - theme-appropriate design
     if (isDark) {
       btn.style.setProperty('background-color', 'rgba(15, 23, 42, 0.9)', 'important');
@@ -133,7 +133,7 @@ export default function EventStyled({
       btn.style.setProperty('background-color', 'rgba(255, 255, 255, 0.95)', 'important');
       btn.style.setProperty('border', '1px solid rgba(203, 213, 225, 0.8)', 'important');
     }
-    
+
     btn.style.setProperty('width', '18px', 'important');
     btn.style.setProperty('height', '18px', 'important');
     btn.style.setProperty('border-radius', '3px', 'important');
@@ -143,7 +143,7 @@ export default function EventStyled({
     btn.style.setProperty('align-items', 'center', 'important');
     btn.style.setProperty('justify-content', 'center', 'important');
     btn.style.setProperty('backdrop-filter', 'blur(4px)', 'important');
-    
+
     if (svg) {
       if (isDark) {
         svg.style.setProperty('stroke', '#cbd5e1', 'important');
@@ -164,7 +164,7 @@ export default function EventStyled({
             // Dark mode: use darker, muted backgrounds
             const darkBg = `rgba(${Math.floor(rgb.r * 0.25)}, ${Math.floor(rgb.g * 0.25)}, ${Math.floor(rgb.b * 0.25)}, 0.9)`;
             const lightText = `rgba(${Math.min(255, rgb.r + 100)}, ${Math.min(255, rgb.g + 100)}, ${Math.min(255, rgb.b + 100)}, 1)`;
-            return { 
+            return {
               bg: darkBg,
               border: raw,
               text: lightText
@@ -173,7 +173,7 @@ export default function EventStyled({
             // Light mode: use lighter, pastel backgrounds
             const lightBg = `rgba(${rgb.r}, ${rgb.g}, ${rgb.b}, 0.15)`;
             const darkText = `rgba(${Math.floor(rgb.r * 0.6)}, ${Math.floor(rgb.g * 0.6)}, ${Math.floor(rgb.b * 0.6)}, 1)`;
-            return { 
+            return {
               bg: lightBg,
               border: raw,
               text: darkText
@@ -194,13 +194,14 @@ export default function EventStyled({
   };
 
   const colors = getColorScheme();
-  const shouldSpanFull = !event?.collapsed;
+  const CustomComp = (event as any)?.CustomEventComponent;
+  const shouldSpanFull = !((event as any)?.collapsed);
 
   return (
     <div
       key={event?.id}
       className="w-full h-full relative cursor-pointer group"
-      style={{ 
+      style={{
         gridColumn: shouldSpanFull ? '1 / -1' : 'auto',
         minHeight: 0,
         padding: '2px'
@@ -211,11 +212,47 @@ export default function EventStyled({
         ref={deleteBtnRef}
         onClick={(e: React.MouseEvent<HTMLButtonElement>) => {
           e.stopPropagation();
-          handlers.handleDeleteEvent(event?.id);
-          onDelete?.(event?.id);
+          // Make the decision async so we can verify with server data if needed
+          (async () => {
+            try {
+              const evAny: any = event || {};
+              const tplId = evAny && (evAny.raw && (evAny.raw.template_id || evAny.raw.templateId)) || evAny.template_id || evAny.templateId || null;
+              let isSeries = !!(evAny && (evAny.recurrence || evAny.repeatOption || tplId));
+
+              // If client heuristics didn't mark it as a series, ask the server for the
+              // authoritative event to avoid accidentally performing a single-delete
+              // when the server treats this as part of a template/recurrence.
+              if (!isSeries && event?.id) {
+                try {
+                  const resp = await fetch(`/api/events/${encodeURIComponent(event.id)}`);
+                  if (resp.ok) {
+                    const payload = await resp.json().catch(() => null);
+                    const serverEv = payload?.event || payload || null;
+                    const serverTpl = serverEv && (serverEv.template_id || (serverEv.raw && (serverEv.raw.template_id || serverEv.raw.templateId)) || serverEv.templateId) || null;
+                    isSeries = !!(serverEv && (serverEv.recurrence || serverEv.repeatOption || serverTpl));
+                  }
+                } catch (e) {
+                  // ignore server lookup errors and fall back to client heuristics
+                }
+              }
+
+              if (!isSeries) {
+                // simple single delete
+                try { handlers.handleDeleteEvent(event?.id); } catch (e) { /* ignore */ }
+                try { onDelete?.(event?.id); } catch (e) { /* ignore */ }
+                return;
+              }
+
+              // show scope modal for series delete
+              setShowDeleteScope(true);
+            } catch (err) {
+              // fallback to single delete
+              try { handlers.handleDeleteEvent(event?.id); onDelete?.(event?.id); } catch (e) { }
+            }
+          })();
         }}
-        aria-label="Delete event"
-        className="absolute z-[100] event-delete-btn opacity-0 group-hover:opacity-100 transition-all duration-200"
+  aria-label="Delete event"
+  className="absolute z-[100] event-delete-btn transition-all duration-200"
         style={{
           right: '5px',
           top: '5px',
@@ -245,7 +282,35 @@ export default function EventStyled({
         </svg>
       </button>
 
-      {event.CustomEventComponent ? (
+      {/* Scope chooser when deleting a recurring series from the timetable */}
+      <EditScopeModal
+        visible={showDeleteScope}
+        mode={'delete'}
+        onClose={() => setShowDeleteScope(false)}
+            onConfirm={async (scope) => {
+              try {
+                setShowDeleteScope(false);
+                const id = event?.id;
+                if (!id) return;
+                if (scope === 'single') {
+                  handlers.handleDeleteEvent(id);
+                  onDelete?.(id);
+                  return;
+                }
+                // scope === 'all' -> delegate to provider which will attempt
+                // server bulk delete and refresh provider state (centralized logic).
+                try {
+                  await handlers.handleDeleteEvent(id, 'all');
+                } catch (e) {
+                  console.warn('[EventStyled] handlers.handleDeleteEvent(scope=all) failed', e);
+                }
+              } catch (err) {
+                console.warn('Delete scope handler failed', err);
+              }
+            }}
+      />
+
+      {CustomComp ? (
         <div
           onClick={(e: React.MouseEvent<HTMLDivElement>) => {
             e.stopPropagation();
@@ -260,7 +325,7 @@ export default function EventStyled({
           }}
           className="w-full h-full cursor-pointer"
         >
-          <event.CustomEventComponent {...event} />
+          <CustomComp {...(event as any)} />
         </div>
       ) : (
         <div
@@ -285,7 +350,7 @@ export default function EventStyled({
             borderTop: `1px solid ${isDark ? 'rgba(71, 85, 105, 0.3)' : 'rgba(203, 213, 225, 0.5)'}`,
             borderRight: `1px solid ${isDark ? 'rgba(71, 85, 105, 0.3)' : 'rgba(203, 213, 225, 0.5)'}`,
             borderBottom: `1px solid ${isDark ? 'rgba(71, 85, 105, 0.3)' : 'rgba(203, 213, 225, 0.5)'}`,
-            padding: event?.minmized ? '8px 10px' : '10px 12px',
+            padding: (event as any)?.minmized ? '8px 10px' : '10px 12px',
             display: 'flex',
             flexDirection: 'column',
             gap: '4px',
@@ -294,8 +359,8 @@ export default function EventStyled({
             boxShadow: 'none',
           }}
         >
-          <div style={{ 
-            fontWeight: 600, 
+          <div style={{
+            fontWeight: 600,
             fontSize: '13px',
             lineHeight: '1.3',
             color: colors.text,
@@ -308,16 +373,16 @@ export default function EventStyled({
           }}>
             {event?.title || 'Untitled Event'}
           </div>
-          <div style={{ 
+          <div style={{
             fontSize: '11px',
             fontWeight: 500,
             color: isDark ? '#94a3b8' : '#64748b',
           }}>
             {formatTime(event?.startDate)}
           </div>
-          
-          {!event?.minmized && event?.description && (
-            <div style={{ 
+
+          {!((event as any)?.minmized) && event?.description && (
+            <div style={{
               fontSize: '12px',
               lineHeight: '1.5',
               color: isDark ? '#94a3b8' : '#64748b',

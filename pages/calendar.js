@@ -1,4 +1,5 @@
 import React, { useState, useMemo, useEffect, useRef } from 'react';
+import EditScopeModal from '@/components/Timetable/EditScopeModal';
 import Head from 'next/head';
 import { Calendar, Plus, ChevronLeft, ChevronRight, Trash2, Edit3, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
@@ -8,7 +9,7 @@ import { Label } from '@/components/ui/label';
 // Using native select in this page for a simpler behavior; keep other UI helpers imported separately
 import { Textarea } from '@/components/ui/textarea';
 
-const monthNames = ['January','February','March','April','May','June','July','August','September','October','November','December'];
+const monthNames = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
 
 // Load events from data/events.json and remove mock/sample data.
 let persistedEvents = [];
@@ -20,13 +21,13 @@ try {
       id: String(e.id),
       title: e.title || 'Untitled',
       // normalize date to YYYY-MM-DD if possible
-      date: (e.date && typeof e.date === 'string') ? (e.date.length >= 10 ? e.date.slice(0,10) : e.date) : '',
+      date: (e.date && typeof e.date === 'string') ? (e.date.length >= 10 ? e.date.slice(0, 10) : e.date) : '',
       startTime: e.time || e.startTime || '',
       endTime: e.endTime || '',
       type: e.type || 'event',
       location: e.location || '',
       description: e.description || '',
-  color: (e.type === 'class' || e.type === 'timetable' || e.type === 'lecture') ? 'bg-primary' : (e.type === 'deadline' ? 'bg-error' : 'bg-secondary')
+      color: (e.type === 'class' || e.type === 'timetable' || e.type === 'lecture') ? 'bg-primary' : (e.type === 'deadline' ? 'bg-error' : 'bg-secondary')
     }));
   }
 } catch (err) {
@@ -53,7 +54,7 @@ function toYMD(d) {
     const day = String(date.getDate()).padStart(2, '0');
     return `${y}-${m}-${day}`;
   } catch (e) {
-    return String(d).slice(0,10);
+    return String(d).slice(0, 10);
   }
 }
 
@@ -65,6 +66,11 @@ export default function CalendarPage() {
   const [selectedDate, setSelectedDate] = useState(toYMD(new Date()));
   const [selectedEvent, setSelectedEvent] = useState(null);
   const [showEventModal, setShowEventModal] = useState(false);
+  const [showEditScopeModal, setShowEditScopeModal] = useState(false);
+  const [pendingSavePayload, setPendingSavePayload] = useState(null);
+  const [pendingEventId, setPendingEventId] = useState(null);
+  const [showDeleteScopeModal, setShowDeleteScopeModal] = useState(false);
+  const [pendingDeleteId, setPendingDeleteId] = useState(null);
   const [newEvent, setNewEvent] = useState({ title: '', date: toYMD(new Date()), startTime: '', endTime: '', type: 'event', location: '', description: '', color: 'bg-blue-500' });
   const gridRef = useRef(null);
   const [showDebug, setShowDebug] = useState(false);
@@ -95,7 +101,7 @@ export default function CalendarPage() {
 
     let cancelled = false;
     const y = currentDate.getFullYear();
-    const range = `${y}-${y+1}`;
+    const range = `${y}-${y + 1}`;
     (async () => {
       try {
         const res = await fetch(`/api/holidays?year=${encodeURIComponent(range)}&country=IQ`);
@@ -122,7 +128,7 @@ export default function CalendarPage() {
     try {
       const last = typeof window !== 'undefined' ? localStorage.getItem('up:lastEventColor') : null;
       if (last) setNewEvent(prev => ({ ...prev, color: last }));
-    } catch (e) {}
+    } catch (e) { }
   }, []);
 
   // keep newEvent.color consistent for 'class' type: use legend color bg-primary unless user overrides
@@ -131,7 +137,7 @@ export default function CalendarPage() {
       if (newEvent.type === 'class' || newEvent.type === 'timetable') {
         setNewEvent(prev => ({ ...prev, color: prev.color && prev.color.startsWith('bg-') ? prev.color : 'bg-primary' }));
       }
-    } catch (e) {}
+    } catch (e) { }
   }, [newEvent.type]);
 
   // Open the create-event modal prefilled for today
@@ -147,6 +153,67 @@ export default function CalendarPage() {
     setShowEventModal(true);
   };
 
+  // Handler when user confirms scope in EditScopeModal
+  async function handleScopeConfirm(scope) {
+    setShowEditScopeModal(false);
+    try {
+      if (!pendingSavePayload || !pendingEventId) return;
+      const ev = selectedEvent || events.find(e => e.id === pendingEventId) || {};
+      const tplId = ev.template_id || (ev.raw && (ev.raw.template_id || ev.raw.templateId)) || null;
+      if (scope === 'single' || !tplId) {
+        const res = await fetch(`/api/events/${pendingEventId}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(pendingSavePayload) });
+        if (!res.ok) throw new Error('Update failed');
+        const json = await res.json().catch(() => null);
+        const updated = json?.event || json;
+        setEvents(prev => prev.map(ev => ev.id === pendingEventId ? { ...ev, title: updated?.title || ev.title, date: updated?.date || ev.date, startTime: updated?.time || ev.startTime, location: updated?.location || ev.location, description: updated?.description || ev.description } : ev));
+      } else {
+        // future/all: fetch events list and patch matching events
+        const list = await fetch('/api/events').then(r => r.ok ? r.json().catch(() => null) : null);
+        const eventsList = Array.isArray(list?.events) ? list.events : (Array.isArray(list) ? list : []);
+        const baseDate = new Date(ev.date || (ev.raw && ev.raw.date) || ev.startDate || null);
+        const toPatch = eventsList.filter(ei => {
+          const evTpl = ei && (ei.template_id || (ei.raw && (ei.raw.template_id || ei.raw.templateId))) || null;
+          if (!evTpl || String(evTpl) !== String(tplId)) return false;
+          return true;
+        });
+        for (const p of toPatch) {
+          try { await fetch(`/api/events/${encodeURIComponent(p.id)}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(pendingSavePayload) }); } catch (e) { console.warn('Bulk update failed for event', p && p.id, e); }
+        }
+        // refresh events
+        try {
+          const r = await fetch('/api/events');
+          if (r.ok) {
+            const pl = await r.json();
+            const listNorm = Array.isArray(pl?.events) ? pl.events : (Array.isArray(pl) ? pl : []);
+            const normalized = listNorm.map(e => ({
+              id: String(e.id),
+              title: e.title || pendingSavePayload.title,
+              date: e.date || pendingSavePayload.date,
+              startTime: e.time || '',
+              endTime: e.endTime || '',
+              type: e.type || 'event',
+              location: e.location || '',
+              description: e.description || '',
+              color: e.color || 'bg-secondary',
+              template_id: e.template_id || e.templateId || null,
+              repeatOption: e.repeatOption || e.repeat_option || null,
+              raw: e
+            }));
+            const preserved = (events || []).filter(ev => String(ev.id).startsWith('tmp-'));
+            setEvents([...normalized, ...preserved]);
+          }
+        } catch (e) { /* ignore */ }
+      }
+    } catch (e) {
+      console.warn('Scope update failed', e);
+      showToast('Update failed', 'error');
+      // reload or rollback could be added here
+    } finally {
+      setPendingSavePayload(null);
+      setPendingEventId(null);
+    }
+  }
+
   // Load events from server (Prisma-backed) on mount. Keep any temporary/timetable placeholders.
   useEffect(() => {
     let cancelled = false;
@@ -160,13 +227,16 @@ export default function CalendarPage() {
         const normalized = list.map(e => ({
           id: String(e.id),
           title: e.title || 'Untitled',
-          date: (e.date && typeof e.date === 'string') ? (e.date.length >= 10 ? e.date.slice(0,10) : e.date) : (e.date ? e.date : ''),
+          date: (e.date && typeof e.date === 'string') ? (e.date.length >= 10 ? e.date.slice(0, 10) : e.date) : (e.date ? e.date : ''),
           startTime: e.time || e.startTime || '',
           endTime: e.endTime || '',
           type: e.type || 'event',
           location: e.location || '',
           description: e.description || '',
-          color: (e.type === 'class' || e.type === 'lecture') ? 'bg-primary' : (e.type === 'deadline' ? 'bg-error' : 'bg-secondary')
+          color: (e.type === 'class' || e.type === 'lecture') ? 'bg-primary' : (e.type === 'deadline' ? 'bg-error' : 'bg-secondary'),
+          template_id: e.template_id || e.templateId || null,
+          repeatOption: e.repeatOption || e.repeat_option || null,
+          raw: e
         }));
         // preserve any client-only temporary or timetable entries already in memory
         setEvents(prev => {
@@ -208,45 +278,79 @@ export default function CalendarPage() {
         const occurrences = [];
 
         for (const c of classes) {
-          const start = c.time || '';
-          const end = start ? computeEndTime(start, c.duration || 1) : '';
+          // Support two template shapes:
+          // 1) simple template objects with c.dayOfWeek/c.time
+          // 2) templates with a `payload` array where each module contains its own dayOfWeek/time
+          const tplStart = c.time || '';
+          const tplEnd = tplStart ? computeEndTime(tplStart, c.duration || 1) : '';
 
-          // If class explicitly has a date and is not marked to repeat, just include it if visible
-          if (c.date && !c.repeat && c.repeatOption !== 'weekly' && c.dayOfWeek == null) {
-            const d = (typeof c.date === 'string' && c.date.length >= 10) ? c.date.slice(0,10) : toYMD(c.date);
-            if (visibleDates.has(d)) {
-                occurrences.push({
-                  id: `tt-${String(c.id)}`,
-                  title: c.subject || c.title || 'Class',
-                  date: d,
-                  startTime: start,
-                  endTime: end,
-                  type: 'timetable',
-                  location: c.location || '',
-                  description: c.instructor ? `Instructor: ${c.instructor}` : (c.description || ''),
-                  color: c.color || 'bg-primary'
-                });
+          // Helper to push a mapped occurrence
+          const pushOccurrence = (oid, title, dateStr, startTime, endTime, moduleRaw) => {
+            occurrences.push({
+              id: oid,
+              title: title || c.subject || c.title || 'Class',
+              date: dateStr,
+              startTime: startTime || tplStart,
+              endTime: endTime || (startTime ? computeEndTime(startTime, (moduleRaw && moduleRaw.duration) || c.duration || 1) : tplEnd),
+              type: 'timetable',
+              location: (moduleRaw && (moduleRaw.location || c.location)) || c.location || '',
+              description: (moduleRaw && (moduleRaw.instructor ? `Instructor: ${moduleRaw.instructor}` : (moduleRaw.description || c.description))) || (c.instructor ? `Instructor: ${c.instructor}` : (c.description || '')),
+              color: (moduleRaw && moduleRaw.color) || c.color || 'bg-primary',
+              template_id: c.id,
+              repeatOption: c.repeatOption || c.repeat_option || null,
+              raw: moduleRaw || c
+            });
+          };
+
+          // If template has a payload of modules, expand each module
+          if (Array.isArray(c.payload) && c.payload.length > 0) {
+            for (let mi = 0; mi < c.payload.length; mi++) {
+              const mod = c.payload[mi] || {};
+              const moduleDow = (typeof mod.dayOfWeek === 'number') ? mod.dayOfWeek : (typeof mod.dow === 'number' ? mod.dow : null);
+              const moduleDate = mod.date || mod.startDate || null;
+              const moduleTime = mod.time || mod.startTime || tplStart;
+              const moduleEnd = moduleTime ? computeEndTime(moduleTime, mod.duration || c.duration || 1) : tplEnd;
+
+              if (moduleDow != null) {
+                for (const dObj of gridDays) {
+                  if (dObj.date.getDay() === moduleDow) {
+                    const d = toYMD(dObj.date);
+                    if (visibleDates.has(d)) pushOccurrence(`tt-${String(c.id)}-${mi}-${d}`, mod.subject || c.subject || c.title, d, moduleTime, moduleEnd, mod);
+                  }
+                }
+                continue;
               }
+
+              if (moduleDate) {
+                const d = (typeof moduleDate === 'string' && moduleDate.length >= 10) ? moduleDate.slice(0, 10) : toYMD(moduleDate);
+                if (visibleDates.has(d)) pushOccurrence(`tt-${String(c.id)}-${mi}-${d}`, mod.subject || c.subject || c.title, d, moduleTime, moduleEnd, mod);
+                continue;
+              }
+            }
             continue;
           }
 
-          // If class is a weekly template (has dayOfWeek or repeatOption === 'weekly'), expand across visible dates
-          const dow = (typeof c.dayOfWeek === 'number') ? c.dayOfWeek : (c.repeatOption === 'weekly' && typeof c.dayOfWeek === 'number' ? c.dayOfWeek : null);
+          // If class explicitly has a date and is not marked to repeat, just include it if visible
+          const start = tplStart;
+          const end = tplEnd;
+          if (c.date && !c.repeat && !(c.repeatOption || c.repeat_option) && c.dayOfWeek == null) {
+            const d = (typeof c.date === 'string' && c.date.length >= 10) ? c.date.slice(0, 10) : toYMD(c.date);
+            if (visibleDates.has(d)) {
+              pushOccurrence(`tt-${String(c.id)}`, c.subject || c.title || 'Class', d, start, end, c);
+            }
+            continue;
+          }
+
+          // If class is a weekly template (has dayOfWeek or repeatOption that indicates weekly), expand across visible dates
+          // Accept both 'weekly' and 'every-week' style values
+          const repeatOpt = c.repeatOption || c.repeat_option || null;
+          const repeatIsWeekly = typeof repeatOpt === 'string' && (repeatOpt === 'weekly' || /every[-_]?(week|weekly)/i.test(repeatOpt));
+          const dow = (typeof c.dayOfWeek === 'number') ? c.dayOfWeek : (repeatIsWeekly && typeof c.dayOfWeek === 'number' ? c.dayOfWeek : null);
           if (dow != null) {
             for (const dObj of gridDays) {
-                if (dObj.date.getDay() === dow) {
+              if (dObj.date.getDay() === dow) {
                 const d = toYMD(dObj.date);
-                occurrences.push({
-                  id: `tt-${String(c.id)}-${d}`,
-                  title: c.subject || c.title || 'Class',
-                  date: d,
-                  startTime: start,
-                  endTime: end,
-                  type: 'timetable',
-                  location: c.location || '',
-                  description: c.instructor ? `Instructor: ${c.instructor}` : (c.description || ''),
-                  color: c.color || 'bg-primary'
-                });
+                pushOccurrence(`tt-${String(c.id)}-${d}`, c.subject || c.title || 'Class', d, start, end, c);
               }
             }
             continue;
@@ -254,19 +358,9 @@ export default function CalendarPage() {
 
           // Fallback: if no repeat info, include single date if visible
           if (c.date) {
-            const d = (typeof c.date === 'string' && c.date.length >= 10) ? c.date.slice(0,10) : toYMD(c.date);
+            const d = (typeof c.date === 'string' && c.date.length >= 10) ? c.date.slice(0, 10) : toYMD(c.date);
             if (visibleDates.has(d)) {
-              occurrences.push({
-                id: `tt-${String(c.id)}`,
-                title: c.subject || c.title || 'Class',
-                date: d,
-                startTime: start,
-                endTime: end,
-                type: 'timetable',
-                location: c.location || '',
-                description: c.instructor ? `Instructor: ${c.instructor}` : (c.description || ''),
-                color: c.color || 'bg-primary'
-              });
+              pushOccurrence(`tt-${String(c.id)}`, c.subject || c.title || 'Class', d, start, end, c);
             }
           }
         }
@@ -282,20 +376,37 @@ export default function CalendarPage() {
             if (existingIds.has(String(o.id))) return;
 
             // Look for an existing server event that matches by title, date and startTime
-            const clashIndex = merged.findIndex(p => p.title === o.title && p.date === o.date && (p.startTime||'') === (o.startTime||''));
+            const clashIndex = merged.findIndex(p => p.title === o.title && p.date === o.date && (p.startTime || '') === (o.startTime || ''));
             if (clashIndex !== -1) {
               // Promote the existing event to a lecture/timetable entry so visuals match
               merged[clashIndex] = {
                 ...merged[clashIndex],
                 type: 'lecture',
-                color: o.color || 'bg-primary'
+                color: o.color || 'bg-primary',
+                template_id: o.template_id || o.templateId || null,
+                repeatOption: o.repeatOption || o.repeat_option || null,
+                raw: o.raw || o
               };
               return;
             }
 
             // also avoid exact title/date/time duplicates against the original prev array
-            const clash = prev.find(p => p.title === o.title && p.date === o.date && (p.startTime||'') === (o.startTime||''));
-            if (clash) return;
+            const clash = prev.find(p => p.title === o.title && p.date === o.date && (p.startTime || '') === (o.startTime || ''));
+            if (clash) {
+              // update preserved existing event to include timetable/template metadata so it is treated as a series
+              const idx = merged.findIndex(p => String(p.id) === String(clash.id));
+              if (idx !== -1) {
+                merged[idx] = {
+                  ...merged[idx],
+                  type: 'lecture',
+                  color: o.color || 'bg-primary',
+                  template_id: o.template_id || o.templateId || null,
+                  repeatOption: o.repeatOption || o.repeat_option || null,
+                  raw: o.raw || o
+                };
+              }
+              return;
+            }
 
             merged.push(o);
           });
@@ -327,22 +438,22 @@ export default function CalendarPage() {
     // current month days
     for (let i = 1; i <= daysInMonth; i++) days.push({ date: new Date(year, month, i), isCurrentMonth: true });
 
-  // Always render 6 rows (42 cells) so the calendar grid has a consistent height
-  // across all months. This keeps layout stable and prevents jumps when months
-  // require 5 vs 6 weeks.
-  // Previously the calendar always forced 6 rows (42 cells). That produced
-  // unnecessary grey rows for many months. Instead, append only enough
-  // trailing days from the next month to complete the final week.
-  // Determine how many trailing days are needed so the last calendar row
-  // ends on Saturday (weekday 6). If the month's last day is Saturday,
-  // no trailing days are added.
-  const lastWeekday = lastDay.getDay(); // 0 (Sun) - 6 (Sat)
-  const trailingDays = lastWeekday === 6 ? 0 : (6 - lastWeekday);
+    // Always render 6 rows (42 cells) so the calendar grid has a consistent height
+    // across all months. This keeps layout stable and prevents jumps when months
+    // require 5 vs 6 weeks.
+    // Previously the calendar always forced 6 rows (42 cells). That produced
+    // unnecessary grey rows for many months. Instead, append only enough
+    // trailing days from the next month to complete the final week.
+    // Determine how many trailing days are needed so the last calendar row
+    // ends on Saturday (weekday 6). If the month's last day is Saturday,
+    // no trailing days are added.
+    const lastWeekday = lastDay.getDay(); // 0 (Sun) - 6 (Sat)
+    const trailingDays = lastWeekday === 6 ? 0 : (6 - lastWeekday);
 
-  for (let i = 1; i <= trailingDays; i++) {
-    const next = new Date(year, month + 1, i);
-    days.push({ date: next, isCurrentMonth: false });
-  }
+    for (let i = 1; i <= trailingDays; i++) {
+      const next = new Date(year, month + 1, i);
+      days.push({ date: next, isCurrentMonth: false });
+    }
 
     return days;
   };
@@ -359,7 +470,7 @@ export default function CalendarPage() {
         const gridEl = gridRef.current;
         const rect = gridEl.getBoundingClientRect();
         const top = rect.top; // distance from viewport top to grid
-  const available = window.innerHeight - top - 48; // leave larger bottom gap for visible padding
+        const available = window.innerHeight - top - 48; // leave larger bottom gap for visible padding
 
         // gaps between rows: 5 gaps (6 rows) * gap px
         const gapPx = (window.matchMedia('(max-width:900px)').matches ? 4 : 6);
@@ -388,7 +499,7 @@ export default function CalendarPage() {
 
   const getEventsForDate = (date) => {
     const ymd = toYMD(date);
-    return events.filter(ev => toYMD(ev.date) === ymd).sort((a,b) => (a.startTime||'').localeCompare(b.startTime||''));
+    return events.filter(ev => toYMD(ev.date) === ymd).sort((a, b) => (a.startTime || '').localeCompare(b.startTime || ''));
   };
 
   const isHoliday = (date) => {
@@ -492,9 +603,23 @@ export default function CalendarPage() {
           location: newEvent.location || null,
           description: newEvent.description || null
         };
-  const isDev = (typeof process !== 'undefined' && process.env && process.env.NODE_ENV === 'development');
-  if (isDev) payload.userId = 'smoke_user';
-  const res = await fetch(`/api/events/${id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+        const isDev = (typeof process !== 'undefined' && process.env && process.env.NODE_ENV === 'development');
+        if (isDev) payload.userId = 'smoke_user';
+
+        // If this event appears to be part of a series, show scope chooser
+        const evAny = selectedEvent || {};
+        const tplId = evAny.template_id || (evAny.raw && (evAny.raw.template_id || evAny.raw.templateId)) || null;
+        const isSeries = !!(evAny && (evAny.repeatOption || tplId));
+        if (isSeries) {
+          // store pending state and show the EditScopeModal component
+          setPendingSavePayload(payload);
+          setPendingEventId(id);
+          setShowEditScopeModal(true);
+          return;
+        }
+
+        // Default single update
+        const res = await fetch(`/api/events/${id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
         if (!res.ok) {
           // try to parse error body for friendly message
           let body = null;
@@ -525,7 +650,25 @@ export default function CalendarPage() {
     if (!target) return;
     const id = target.id;
 
-    // Optimistically remove from UI
+    // If this event appears to be part of a series/template, prompt for scope
+    const tplId = target && (target.template_id || (target.raw && (target.raw.template_id || target.raw.templateId))) || null;
+    // Fallback: treat timetable-derived ids ('tt-...') as series because they come from timetable templates
+    const isTimetableId = String(id || '').startsWith('tt-');
+    const isSeries = !!(target && (target.repeatOption || tplId || isTimetableId));
+
+    // Debug info to help verify why the modal shows or not — remove in production
+    try { console.debug('[calendar] handleDeleteEvent target:', { id: id, tplId, repeatOption: target && target.repeatOption, isTimetableId }); } catch (e) { }
+    if (isSeries) {
+      // store pending id and show delete-scope chooser
+      setPendingDeleteId(id);
+      setShowDeleteScopeModal(true);
+      // show a visible toast so it's obvious in the UI that the scope chooser should open
+      try { showToast(`Series event detected. Showing scope chooser (id=${id})`, 'info', 5000); } catch (e) { }
+      // keep selection/modal state as-is until user confirms
+      return;
+    }
+
+    // Non-series: Optimistically remove from UI
     setEvents(prev => prev.filter(ev => ev.id !== id));
     // If the deleted event was selected in the modal, clear selection
     if (selectedEvent && String(selectedEvent.id) === String(id)) setSelectedEvent(null);
@@ -545,12 +688,15 @@ export default function CalendarPage() {
               setEvents(list.map(e => ({
                 id: String(e.id),
                 title: e.title || 'Untitled',
-                date: (e.date && typeof e.date === 'string') ? (e.date.length >= 10 ? e.date.slice(0,10) : e.date) : (e.date ? e.date : ''),
+                date: (e.date && typeof e.date === 'string') ? (e.date.length >= 10 ? e.date.slice(0, 10) : e.date) : (e.date ? e.date : ''),
                 startTime: e.time || e.startTime || '',
                 endTime: e.endTime || '',
                 type: e.type || 'event',
                 location: e.location || '',
-                description: e.description || ''
+                description: e.description || '',
+                template_id: e.template_id || e.templateId || null,
+                repeatOption: e.repeatOption || e.repeat_option || null,
+                raw: e
               })));
             }
           } catch (e) { console.warn('Failed to reload events after delete failure', e); }
@@ -560,6 +706,95 @@ export default function CalendarPage() {
       }
     })();
   };
+
+  // Handler when user confirms scope for delete
+  async function handleDeleteScopeConfirm(scope) {
+    setShowDeleteScopeModal(false);
+    try {
+      if (!pendingDeleteId) return;
+      const id = pendingDeleteId;
+      if (scope === 'single') {
+        // remove locally then delete
+        setEvents(prev => prev.filter(ev => ev.id !== id));
+        if (selectedEvent && String(selectedEvent.id) === String(id)) setSelectedEvent(null);
+        setShowEventModal(false);
+        const res = await fetch(`/api/events/${id}`, { method: 'DELETE' });
+        if (!res.ok) {
+          console.error('Server refused delete, reloading events');
+          try {
+            const r = await fetch('/api/events');
+            if (r.ok) {
+              const payload = await r.json();
+              const list = Array.isArray(payload?.events) ? payload.events : (payload?.events || []);
+              setEvents(list.map(e => ({
+                id: String(e.id),
+                title: e.title || 'Untitled',
+                date: (e.date && typeof e.date === 'string') ? (e.date.length >= 10 ? e.date.slice(0, 10) : e.date) : (e.date ? e.date : ''),
+                startTime: e.time || e.startTime || '',
+                endTime: e.endTime || '',
+                type: e.type || 'event',
+                location: e.location || '',
+                description: e.description || ''
+              })));
+            }
+          } catch (e) { console.warn('Failed to reload events after delete failure', e); }
+        }
+      } else {
+        // scope === 'all' -> ask server to delete template + occurrences when supported
+        // Attempt to discover template id locally and pass it explicitly so server
+        // can resolve the series even when materialized occurrences lack template_id
+        let tplId = null;
+        try {
+          // pendingDeleteEvent may have been set where available; if not, try to find in selectedEvent
+          const pendingEv = (typeof pendingDeleteEvent !== 'undefined' && pendingDeleteEvent) ? pendingDeleteEvent : null;
+          tplId = pendingEv && (pendingEv.template_id || (pendingEv.raw && (pendingEv.raw.template_id || pendingEv.raw.templateId)) || pendingEv.templateId) || null;
+        } catch (e) { tplId = null; }
+        // If still missing, try to fetch the event server-side to inspect its raw/template fields
+        if (!tplId) {
+          try {
+            const serverEvRes = await fetch(`/api/events/${encodeURIComponent(id)}`);
+            if (serverEvRes && serverEvRes.ok) {
+              const payload = await serverEvRes.json().catch(() => null);
+              const serverEv = payload && payload.event ? payload.event : payload;
+              tplId = serverEv && (serverEv.template_id || (serverEv.raw && (serverEv.raw.template_id || serverEv.raw.templateId)) || serverEv.templateId) || null;
+            }
+          } catch (e) { tplId = null; }
+        }
+
+        const url = `/api/events/${id}?scope=all${tplId ? `&templateId=${encodeURIComponent(tplId)}` : ''}`;
+        const res = await fetch(url, { method: 'DELETE' });
+        if (!res.ok) {
+          // If server doesn't support scope=all, fallback to reloading events
+          console.error('Server refused bulk delete, reloading events');
+        }
+        try {
+          const r = await fetch('/api/events');
+          if (r.ok) {
+            const payload = await r.json();
+            const list = Array.isArray(payload?.events) ? payload.events : (payload?.events || []);
+            setEvents(list.map(e => ({
+              id: String(e.id),
+              title: e.title || 'Untitled',
+              date: (e.date && typeof e.date === 'string') ? (e.date.length >= 10 ? e.date.slice(0, 10) : e.date) : (e.date ? e.date : ''),
+              startTime: e.time || e.startTime || '',
+              endTime: e.endTime || '',
+              type: e.type || 'event',
+              location: e.location || '',
+              description: e.description || '',
+              template_id: e.template_id || e.templateId || null,
+              repeatOption: e.repeatOption || e.repeat_option || null,
+              raw: e
+            })));
+          }
+        } catch (e) { console.warn('Failed to reload events after bulk delete', e); }
+      }
+    } catch (e) {
+      console.warn('Scope delete failed', e);
+      showToast('Delete failed', 'error');
+    } finally {
+      setPendingDeleteId(null);
+    }
+  }
 
   return (
     <div className="calendar-root min-h-screen bg-gradient-to-br from-slate-50 via-blue-50/30 to-slate-50">
@@ -576,6 +811,8 @@ export default function CalendarPage() {
               <h1 className="text-xl font-bold text-slate-900 dark:text-slate-100">Calendar</h1>
               <p className="text-xs text-slate-700 dark:text-slate-300">Manage your schedule</p>
             </div>
+            <EditScopeModal visible={showEditScopeModal} mode={'edit'} onClose={() => { setShowEditScopeModal(false); setPendingSavePayload(null); setPendingEventId(null); }} onConfirm={(scope) => handleScopeConfirm(scope)} />
+            <EditScopeModal visible={showDeleteScopeModal} mode={'delete'} onClose={() => { setShowDeleteScopeModal(false); setPendingDeleteId(null); }} onConfirm={(scope) => handleDeleteScopeConfirm(scope)} />
           </div>
           <button onClick={handleTodayCreate} className="px-5 py-2 bg-gradient-to-r from-purple-600 to-purple-700 hover:from-purple-500 hover:to-purple-600 text-white rounded-lg text-sm font-medium transition-all duration-200 hover:shadow-lg hover:shadow-purple-500/30 flex items-center gap-2">
             <Plus className="w-4 h-4" />
@@ -584,8 +821,8 @@ export default function CalendarPage() {
         </div>
       </header>
 
-  <main className="max-w-8xl mx-auto pl-8 md:pl-10 p-6 h-[calc(100vh-64px)] overflow-hidden">
-  <div className="md:flex md:items-start md:gap-6 md:justify-end">
+      <main className="max-w-8xl mx-auto pl-8 md:pl-10 p-6 h-[calc(100vh-64px)] overflow-hidden">
+        <div className="md:flex md:items-start md:gap-6 md:justify-end">
           <div className="flex-1 md:mr-4 lg:mr-6">
             <div className="cozy backdrop-blur-sm rounded-2xl shadow-xl border border-slate-200/60 overflow-hidden h-full flex flex-col">
               <div className="px-4 py-3 border-b border-slate-200/60 flex items-center justify-between bg-gradient-to-r from-white via-blue-50/20 to-white">
@@ -608,7 +845,7 @@ export default function CalendarPage() {
 
               <div className="p-3 flex-1 min-h-0 flex flex-col">
                 <div className="grid grid-cols-7 gap-3 mb-3" role="row">
-                    {['Sun','Mon','Tue','Wed','Thu','Fri','Sat'].map(d => (
+                  {['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].map(d => (
                     <div key={d} className="text-center text-sm font-semibold uppercase tracking-wider text-slate-700 dark:text-slate-300 py-2" role="columnheader">
                       {d}
                     </div>
@@ -620,31 +857,29 @@ export default function CalendarPage() {
                     const holiday = isHoliday(day.date);
                     const today = isToday(day.date);
                     const isSelected = selectedDate && toYMD(day.date) === selectedDate;
-                    
+
                     const allItems = [...dayEvents];
                     if (holiday) {
                       allItems.unshift({ id: `holiday-${idx}`, title: holiday.localName || holiday.name, color: 'bg-warning', isHoliday: true });
                     }
-                    
+
                     return (
-                      <div 
-                        key={idx} 
-                        role="gridcell" 
-                        tabIndex={day.isCurrentMonth ? 0 : -1} 
-                        onClick={() => day.isCurrentMonth && handleDateClick(day.date)} 
-                      className={`min-h-[72px] p-2.5 border-2 rounded-xl cursor-pointer transition-all duration-150 ${
-              day.isCurrentMonth
-                    ? (isSelected
-                  ? 'cozy border-purple-300 shadow-sm'
-                  : 'cozy border-slate-200 hover:border-purple-300 hover:shadow-md hover:shadow-purple-100/50')
-                : 'bg-slate-50/50 border-slate-100'
-            }`}
-                      > 
+                      <div
+                        key={idx}
+                        role="gridcell"
+                        tabIndex={day.isCurrentMonth ? 0 : -1}
+                        onClick={() => day.isCurrentMonth && handleDateClick(day.date)}
+                        className={`min-h-[72px] p-2.5 border-2 rounded-xl cursor-pointer transition-all duration-150 ${day.isCurrentMonth
+                            ? (isSelected
+                              ? 'cozy border-purple-300 shadow-sm'
+                              : 'cozy border-slate-200 hover:border-purple-300 hover:shadow-md hover:shadow-purple-100/50')
+                            : 'bg-slate-50/50 border-slate-100'
+                          }`}
+                      >
                         <div className="flex items-center justify-between mb-1">
-                          <div className={`text-lg font-bold ${
-                              !day.isCurrentMonth ? 'text-slate-400' : 
-                              today ? 'text-white bg-gradient-to-br from-purple-600 to-purple-700 w-8 h-8 rounded-lg flex items-center justify-center shadow-md text-sm' : 
-                              'text-slate-800'
+                          <div className={`text-lg font-bold ${!day.isCurrentMonth ? 'text-slate-400' :
+                              today ? 'text-white bg-gradient-to-br from-purple-600 to-purple-700 w-8 h-8 rounded-lg flex items-center justify-center shadow-md text-sm' :
+                                'text-slate-800'
                             }`}>
                             {day.date.getDate()}
                           </div>
@@ -652,7 +887,7 @@ export default function CalendarPage() {
 
                         <div className="events-area">
                           <div className="flex flex-wrap gap-2">
-                            {allItems.slice(0,6).map((item) => {
+                            {allItems.slice(0, 6).map((item) => {
                               // compute dot color: support Tailwind bg-* classes, shorthand like 'indigo-500', and inline colors
                               let dotClass = '';
                               let dotStyle = {};
@@ -682,14 +917,14 @@ export default function CalendarPage() {
 
                               try {
                                 pickColor(val);
-                              } catch (e) {}
+                              } catch (e) { }
 
                               // If we only have a bgClass like 'bg-primary' or 'bg-indigo-500', try to derive a hex fallback
                               if (!dotStyle.background && dotClass) {
                                 try {
                                   const key = dotClass.replace(/^bg-/, '');
                                   if (tailwindToHex[key]) dotStyle.background = tailwindToHex[key];
-                                } catch (e) {}
+                                } catch (e) { }
                               }
 
                               // Final fallback: deterministic palette by id/title
@@ -708,10 +943,10 @@ export default function CalendarPage() {
                               // readable foreground for inline hex (not used for dots but keep for completeness)
                               if (dotStyle.background && String(dotStyle.background).startsWith('#')) {
                                 try {
-                                  const hex = String(dotStyle.background).replace('#','');
-                                  const r = parseInt(hex.slice(0,2),16);
-                                  const g = parseInt(hex.slice(2,4),16);
-                                  const b = parseInt(hex.slice(4,6),16);
+                                  const hex = String(dotStyle.background).replace('#', '');
+                                  const r = parseInt(hex.slice(0, 2), 16);
+                                  const g = parseInt(hex.slice(2, 4), 16);
+                                  const b = parseInt(hex.slice(4, 6), 16);
                                   const lum = (0.2126 * r + 0.7152 * g + 0.0722 * b) / 255;
                                   dotStyle.color = lum > 0.6 ? '#000' : '#fff';
                                 } catch (e) { dotStyle.color = '#fff'; }
@@ -762,11 +997,11 @@ export default function CalendarPage() {
                 <div className="text-xs font-bold text-slate-700 dark:text-slate-300 mb-2">Legend</div>
                 <div className="flex flex-wrap gap-2 items-center">
                   {[
-                    {color:'bg-primary',label:'Lecture'},
-                    {color:'bg-error',label:'Deadline'},
-                    {color:'bg-success',label:'Event'},
-                    {color:'bg-secondary',label:'Assignment'},
-                    {color:'bg-warning',label:'Holiday'}
+                    { color: 'bg-primary', label: 'Lecture' },
+                    { color: 'bg-error', label: 'Deadline' },
+                    { color: 'bg-success', label: 'Event' },
+                    { color: 'bg-secondary', label: 'Assignment' },
+                    { color: 'bg-warning', label: 'Holiday' }
                   ].map(item => (
                     <div key={item.label} className="flex items-center gap-2 px-2 py-1 bg-slate-50 rounded-md border border-slate-100">
                       <div className={`${item.color} rounded-full border border-white shadow-sm`} style={{ width: 8, height: 8, display: 'inline-block', minWidth: 0, minHeight: 0, lineHeight: 0, boxSizing: 'content-box', borderWidth: '1px' }} />
@@ -776,12 +1011,12 @@ export default function CalendarPage() {
                 </div>
               </div>
               <div className="mb-4">
-                  <div className="p-4 cozy rounded-lg border border-slate-100 shadow-sm overflow-hidden">
+                <div className="p-4 cozy rounded-lg border border-slate-100 shadow-sm overflow-hidden">
                   <div className="text-sm text-slate-700 dark:text-slate-300">Selected Day</div>
                   <div className="text-lg font-bold text-slate-900 dark:text-slate-100 mt-1">
-                    {selectedDate ? (() => { const [y,m,d] = selectedDate.split('-'); return new Date(Number(y), Number(m)-1, Number(d)).toLocaleDateString(undefined, { weekday: 'long', year: 'numeric', month: 'short', day: 'numeric' }); })() : 'Select a date'}
+                    {selectedDate ? (() => { const [y, m, d] = selectedDate.split('-'); return new Date(Number(y), Number(m) - 1, Number(d)).toLocaleDateString(undefined, { weekday: 'long', year: 'numeric', month: 'short', day: 'numeric' }); })() : 'Select a date'}
                   </div>
-                  <div className="mt-3 text-sm text-slate-600 dark:text-slate-300">{(() => { const evs = getEventsForDate(selectedDate||''); return evs.length ? `${evs.length} event${evs.length>1?'s':''}` : 'No events'; })()}</div>
+                  <div className="mt-3 text-sm text-slate-600 dark:text-slate-300">{(() => { const evs = getEventsForDate(selectedDate || ''); return evs.length ? `${evs.length} event${evs.length > 1 ? 's' : ''}` : 'No events'; })()}</div>
                 </div>
               </div>
 
@@ -801,10 +1036,10 @@ export default function CalendarPage() {
                           const key = cls.replace(/^bg-/, '');
                           const hex = map[key] || '#F59E0B';
                           const hexToRgba = (h, a) => {
-                            const hx = String(h).replace('#','');
-                            const r = parseInt(hx.slice(0,2),16);
-                            const g = parseInt(hx.slice(2,4),16);
-                            const b = parseInt(hx.slice(4,6),16);
+                            const hx = String(h).replace('#', '');
+                            const r = parseInt(hx.slice(0, 2), 16);
+                            const g = parseInt(hx.slice(2, 4), 16);
+                            const b = parseInt(hx.slice(4, 6), 16);
                             return `rgba(${r}, ${g}, ${b}, ${a})`;
                           };
                           const bg = hexToRgba(hex, 0.12);
@@ -832,7 +1067,7 @@ export default function CalendarPage() {
                           );
                         })()}
                         {evs.length === 0 && !hol ? (
-                            <div className="text-center py-10 text-slate-700 dark:text-slate-300">
+                          <div className="text-center py-10 text-slate-700 dark:text-slate-300">
                             <Calendar className="w-10 h-10 mx-auto mb-3 text-slate-300" />
                             <p className="text-sm font-medium">No events scheduled</p>
                             <p className="text-xs mt-1">Click + to add one</p>
@@ -857,19 +1092,19 @@ export default function CalendarPage() {
                                 </div>
                               </div>
                               <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity duration-200">
-                                <Button 
-                                  size="icon" 
-                                  variant="ghost" 
-                                  onClick={(e) => handleEventClick(e, ev)} 
+                                <Button
+                                  size="icon"
+                                  variant="ghost"
+                                  onClick={(e) => handleEventClick(e, ev)}
                                   className="h-7 w-7 hover:bg-blue-100 hover:text-blue-700 rounded-md"
                                   aria-label={`Edit ${ev.title}`}
                                 >
                                   <Edit3 className="w-3.5 h-3.5" />
                                 </Button>
-                                <Button 
-                                  size="icon" 
-                                  variant="ghost" 
-                                  onClick={() => handleDeleteEvent(ev)} 
+                                <Button
+                                  size="icon"
+                                  variant="ghost"
+                                  onClick={() => handleDeleteEvent(ev)}
                                   className="h-7 w-7 hover:bg-red-100 hover:text-red-700 rounded-md"
                                   aria-label={`Delete ${ev.title}`}
                                 >
@@ -879,38 +1114,38 @@ export default function CalendarPage() {
                             </div>
                           </div>
                         ))}
-                            {evs.length > 0 && (
+                        {evs.length > 0 && (
                           <div className="pt-3 mt-3 border-t-2 border-slate-100">
                             <h5 className="text-xs font-bold text-slate-700 dark:text-slate-300 uppercase tracking-wider mb-2">Upcoming Events</h5>
                             <div className="space-y-2">
                               {events
-                                  .filter(e => {
-                                    try {
-                                      // include only events after the selected date (exclude same-day items)
-                                      const evDate = toYMD(e.date);
-                                      return evDate > toYMD(selectedDate);
-                                    } catch (err) { return false; }
-                                  })
-                                  // sort by date then startTime (empty times sort last)
-                                  .sort((a, b) => {
-                                    const da = toYMD(a.date);
-                                    const db = toYMD(b.date);
-                                    if (da < db) return -1;
-                                    if (da > db) return 1;
-                                    const ta = a.startTime || '';
-                                    const tb = b.startTime || '';
-                                    if (ta === tb) return 0;
-                                    if (!ta) return 1;
-                                    if (!tb) return -1;
-                                    return ta.localeCompare(tb);
-                                  })
-                                  .slice(0,3).map(u => (
-                                <div key={`up-${u.id}`} className="flex items-center gap-2 text-xs p-2 bg-slate-50 rounded-md hover:bg-blue-50 transition-colors">
-                                  <div className={`${u.color} rounded-full flex-shrink-0`} style={{ width: 8, height: 8, display: 'inline-block', minWidth: 0, minHeight: 0, lineHeight: 0, boxSizing: 'content-box', borderWidth: '1px' }}></div>
-                                  <span className="font-medium text-slate-900 dark:text-slate-100 truncate flex-1">{u.title}</span>
-                                  <span className="text-slate-700 dark:text-slate-300 text-xs">{(() => { const [yy,mm,dd] = toYMD(u.date).split('-'); return `${Number(dd)}/${Number(mm)}` })()}</span>
-                                </div>
-                              ))}
+                                .filter(e => {
+                                  try {
+                                    // include only events after the selected date (exclude same-day items)
+                                    const evDate = toYMD(e.date);
+                                    return evDate > toYMD(selectedDate);
+                                  } catch (err) { return false; }
+                                })
+                                // sort by date then startTime (empty times sort last)
+                                .sort((a, b) => {
+                                  const da = toYMD(a.date);
+                                  const db = toYMD(b.date);
+                                  if (da < db) return -1;
+                                  if (da > db) return 1;
+                                  const ta = a.startTime || '';
+                                  const tb = b.startTime || '';
+                                  if (ta === tb) return 0;
+                                  if (!ta) return 1;
+                                  if (!tb) return -1;
+                                  return ta.localeCompare(tb);
+                                })
+                                .slice(0, 3).map(u => (
+                                  <div key={`up-${u.id}`} className="flex items-center gap-2 text-xs p-2 bg-slate-50 rounded-md hover:bg-blue-50 transition-colors">
+                                    <div className={`${u.color} rounded-full flex-shrink-0`} style={{ width: 8, height: 8, display: 'inline-block', minWidth: 0, minHeight: 0, lineHeight: 0, boxSizing: 'content-box', borderWidth: '1px' }}></div>
+                                    <span className="font-medium text-slate-900 dark:text-slate-100 truncate flex-1">{u.title}</span>
+                                    <span className="text-slate-700 dark:text-slate-300 text-xs">{(() => { const [yy, mm, dd] = toYMD(u.date).split('-'); return `${Number(dd)}/${Number(mm)}` })()}</span>
+                                  </div>
+                                ))}
                             </div>
                           </div>
                         )}
@@ -930,7 +1165,7 @@ export default function CalendarPage() {
         </div>
       </main>
 
-  <Dialog open={showEventModal} onOpenChange={(open) => { setShowEventModal(open); if (!open) { setSelectedEvent(null); resetForm(); } }}>
+      <Dialog open={showEventModal} onOpenChange={(open) => { setShowEventModal(open); if (!open) { setSelectedEvent(null); resetForm(); } }}>
         <DialogContent data-state={showEventModal ? 'open' : 'closed'} className="max-w-2xl max-h-[85vh] rounded-2xl border border-slate-200/80 shadow-2xl cozy dialog-cozy flex flex-col overflow-hidden bg-white">
           <DialogHeader className="border-b border-slate-100 bg-gradient-to-r from-purple-50/50 via-white to-blue-50/50">
             <div className="flex items-center justify-between px-6 py-5">
@@ -947,8 +1182,8 @@ export default function CalendarPage() {
                   </p>
                 </div>
               </div>
-              <button 
-                onClick={() => { setShowEventModal(false); setSelectedEvent(null); resetForm(); }} 
+              <button
+                onClick={() => { setShowEventModal(false); setSelectedEvent(null); resetForm(); }}
                 className="p-2 rounded-lg hover:bg-slate-100 transition-colors"
                 aria-label="Close dialog"
               >
@@ -962,12 +1197,12 @@ export default function CalendarPage() {
               <Label htmlFor="title" className="text-sm font-semibold text-slate-700 flex items-center gap-1.5">
                 Event Title <span className="text-red-500">*</span>
               </Label>
-              <Input 
-                id="title" 
-                type="text" 
-                value={newEvent.title} 
-                onChange={(e) => setNewEvent({ ...newEvent, title: e.target.value })} 
-                placeholder="e.g., Team Meeting, Project Deadline" 
+              <Input
+                id="title"
+                type="text"
+                value={newEvent.title}
+                onChange={(e) => setNewEvent({ ...newEvent, title: e.target.value })}
+                placeholder="e.g., Team Meeting, Project Deadline"
                 className="h-12 text-base rounded-lg border-2 border-slate-200 focus:border-purple-500 focus:ring-2 focus:ring-purple-200 transition-all"
                 required
               />
@@ -978,11 +1213,11 @@ export default function CalendarPage() {
                 <Label htmlFor="date" className="text-sm font-semibold text-slate-700 flex items-center gap-1.5">
                   Date <span className="text-red-500">*</span>
                 </Label>
-                <Input 
-                  id="date" 
-                  type="date" 
-                  value={newEvent.date} 
-                  onChange={(e) => setNewEvent({ ...newEvent, date: e.target.value })} 
+                <Input
+                  id="date"
+                  type="date"
+                  value={newEvent.date}
+                  onChange={(e) => setNewEvent({ ...newEvent, date: e.target.value })}
                   className="h-12 rounded-lg border-2 border-slate-200 focus:border-purple-500 focus:ring-2 focus:ring-purple-200 transition-all"
                   required
                 />
@@ -1006,21 +1241,21 @@ export default function CalendarPage() {
             <div className="grid grid-cols-2 gap-4">
               <div className="space-y-2">
                 <Label htmlFor="startTime" className="text-sm font-semibold text-slate-700">Start Time</Label>
-                <Input 
-                  id="startTime" 
-                  type="time" 
-                  value={newEvent.startTime} 
-                  onChange={(e) => setNewEvent({ ...newEvent, startTime: e.target.value })} 
+                <Input
+                  id="startTime"
+                  type="time"
+                  value={newEvent.startTime}
+                  onChange={(e) => setNewEvent({ ...newEvent, startTime: e.target.value })}
                   className="h-12 rounded-lg border-2 border-slate-200 focus:border-purple-500 focus:ring-2 focus:ring-purple-200 transition-all"
                 />
               </div>
               <div className="space-y-2">
                 <Label htmlFor="endTime" className="text-sm font-semibold text-slate-700">End Time</Label>
-                <Input 
-                  id="endTime" 
-                  type="time" 
-                  value={newEvent.endTime} 
-                  onChange={(e) => setNewEvent({ ...newEvent, endTime: e.target.value })} 
+                <Input
+                  id="endTime"
+                  type="time"
+                  value={newEvent.endTime}
+                  onChange={(e) => setNewEvent({ ...newEvent, endTime: e.target.value })}
                   className="h-12 rounded-lg border-2 border-slate-200 focus:border-purple-500 focus:ring-2 focus:ring-purple-200 transition-all"
                 />
               </div>
@@ -1028,12 +1263,12 @@ export default function CalendarPage() {
 
             <div className="space-y-2">
               <Label htmlFor="location" className="text-sm font-semibold text-slate-700">Location</Label>
-              <Input 
-                id="location" 
-                type="text" 
-                value={newEvent.location} 
-                onChange={(e) => setNewEvent({ ...newEvent, location: e.target.value })} 
-                placeholder="e.g., Room 301, Online, Conference Hall" 
+              <Input
+                id="location"
+                type="text"
+                value={newEvent.location}
+                onChange={(e) => setNewEvent({ ...newEvent, location: e.target.value })}
+                placeholder="e.g., Room 301, Online, Conference Hall"
                 className="h-12 text-base rounded-lg border-2 border-slate-200 focus:border-purple-500 focus:ring-2 focus:ring-purple-200 transition-all"
               />
             </div>
@@ -1041,19 +1276,18 @@ export default function CalendarPage() {
             <div className="space-y-2">
               <Label className="text-sm font-semibold text-slate-700">Color</Label>
               <div className="flex gap-2.5 flex-wrap">
-                {['bg-primary','bg-secondary','bg-accent','bg-info','bg-success','bg-warning','bg-error','bg-neutral'].map(color => (
+                {['bg-primary', 'bg-secondary', 'bg-accent', 'bg-info', 'bg-success', 'bg-warning', 'bg-error', 'bg-neutral'].map(color => (
                   <button
                     key={color}
                     type="button"
                     onClick={() => {
-                      try { localStorage.setItem('up:lastEventColor', color); } catch (e) {}
+                      try { localStorage.setItem('up:lastEventColor', color); } catch (e) { }
                       setNewEvent({ ...newEvent, color });
                     }}
-                    className={`w-11 h-11 ${color} rounded-lg transition-all duration-200 ${
-                      newEvent.color === color 
-                        ? 'ring-3 ring-offset-2 ring-slate-400 shadow-lg scale-105' 
+                    className={`w-11 h-11 ${color} rounded-lg transition-all duration-200 ${newEvent.color === color
+                        ? 'ring-3 ring-offset-2 ring-slate-400 shadow-lg scale-105'
                         : 'hover:scale-105 hover:shadow-md'
-                    }`}
+                      }`}
                     aria-label={`Select ${color} color`}
                   />
                 ))}
@@ -1075,24 +1309,24 @@ export default function CalendarPage() {
 
           <div className="border-t border-slate-100 px-6 py-4 bg-slate-50/50">
             <div className="flex gap-3">
-              <Button 
-                onClick={() => { setShowEventModal(false); setSelectedEvent(null); resetForm(); }} 
-                variant="outline" 
+              <Button
+                onClick={() => { setShowEventModal(false); setSelectedEvent(null); resetForm(); }}
+                variant="outline"
                 className="flex-1 h-11 border-slate-300 hover:bg-slate-100 rounded-lg font-medium text-slate-700"
               >
                 Cancel
               </Button>
               {selectedEvent && (
-                <Button 
-                  onClick={() => { handleDeleteEvent(selectedEvent); }} 
+                <Button
+                  onClick={() => { handleDeleteEvent(selectedEvent); }}
                   variant="outline"
                   className="h-11 px-5 border-red-300 hover:bg-red-50 text-red-600 hover:text-red-700 rounded-lg font-medium"
                 >
                   Delete
                 </Button>
               )}
-              <Button 
-                onClick={selectedEvent ? handleUpdateEvent : handleCreateEvent} 
+              <Button
+                onClick={selectedEvent ? handleUpdateEvent : handleCreateEvent}
                 disabled={!newEvent.title || !newEvent.date}
                 className="flex-1 h-11 bg-gradient-to-r from-purple-600 to-purple-700 hover:from-purple-700 hover:to-purple-800 text-white shadow-md hover:shadow-lg disabled:opacity-50 disabled:cursor-not-allowed rounded-lg font-medium transition-all"
               >
@@ -1334,8 +1568,8 @@ function DebugOverlay({ gridRef }) {
   }, [gridRef]);
 
   return (
-    <div style={{position:'fixed',right:12,top:12,zIndex:9999,background:'#0f172a',color:'#fff',padding:10,borderRadius:8,boxShadow:'0 6px 18px rgba(0,0,0,0.2)',fontSize:12}}>
-      <div style={{fontWeight:700,marginBottom:6}}>Debug metrics (toggle with 'd')</div>
+    <div style={{ position: 'fixed', right: 12, top: 12, zIndex: 9999, background: '#0f172a', color: '#fff', padding: 10, borderRadius: 8, boxShadow: '0 6px 18px rgba(0,0,0,0.2)', fontSize: 12 }}>
+      <div style={{ fontWeight: 700, marginBottom: 6 }}>Debug metrics (toggle with 'd')</div>
       <div>window.innerHeight: {metrics.winH}</div>
       <div>header height: {metrics.headerH}</div>
       <div>main height: {metrics.mainH}</div>

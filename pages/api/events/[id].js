@@ -367,72 +367,183 @@ export default async function handler(req, res) {
       }
       
       case 'DELETE': {
-        // If client requested deleting the entire series (all materialized occurrences),
-        // support ?scope=all by deleting all events with the same template_id and the template record.
         try {
           const scope = req.query && req.query.scope ? String(req.query.scope) : null;
+          
           if (scope === 'all') {
-            // Find the event in active events first
-            const ev = await safeFindEvent(id, false);
-            let tplId = ev ? ev.template_id : null;
+      console.log(`[events/:id] DELETE scope=all requested for id=${id}`);
 
-            // If not found in active events, try archived lookup
-            if (!tplId) {
-              const archived = await prisma.archivedEvent.findUnique({ where: { original_event_id: id } }) || await prisma.archivedEvent.findUnique({ where: { id } });
-              tplId = archived ? archived.template_id : null;
-            }
+      // Allow caller to provide templateId or repeatOption to guide deletion
+      let tplId = req.query.templateId || req.query.template_id || null;
+      const repeatOptionQuery = req.query && (req.query.repeatOption || req.query.repeat_option) ? String(req.query.repeatOption || req.query.repeat_option) : null;
 
-            if (!tplId) {
-              return res.status(400).json({ code: 'NO_TEMPLATE', message: 'Event is not part of a repeat series or template id is missing' });
-            }
-
-            // Delete all materialized events and the template in a transaction
-            try {
-              const result = await prisma.$transaction(async (tx) => {
-                const deleted = await tx.event.deleteMany({ where: { template_id: tplId } });
-                // Attempt to delete the template record; ignore if already removed
-                try {
-                  await tx.eventTemplate.delete({ where: { id: tplId } });
-                } catch (ignore) {
-                  // swallow not-found errors for template deletion
-                }
-                return deleted;
-              });
-              return res.status(200).json({ success: true, message: 'Series deleted', deletedCount: result.count });
-            } catch (txErr) {
-              console.error(`[events/:id] DELETE series transaction error for template_id=${tplId}:`, txErr && txErr.message ? txErr.message : txErr);
-              return res.status(500).json({ code: 'DELETE_SERIES_FAILED', message: 'Failed to delete event series', details: txErr && txErr.message ? txErr.message : null });
-            }
-          }
-
-          // Otherwise fall back to single-event delete
-          await prisma.event.delete({ where: { id } });
-          return res.status(200).json({ success: true, message: 'Event deleted' });
-        } catch (err) {
-          console.error(`[events/:id] DELETE prisma.event.delete error for id=${id}:`, err && err.message ? err.message : err);
-          // If DB unreachable, try file fallback
-          if (err && (err.code === 'P1001' || String(err.message || '').includes("Can't reach database"))) {
-            try {
-              const local = fallback.delete(id);
-              if (local) return res.status(200).json({ success: true, message: 'Event deleted', event: local });
-            } catch (fe) {
-              console.error('[events/:id] fallback.delete error:', fe && fe.message ? fe.message : fe);
-            }
-          }
-          // Try archived
+      // Try to discover identifying metadata from the event record (meta or description)
+      try {
+        const ev = await safeFindEvent(id, false);
+        if (ev) {
+          // prefer explicit template_id if present on record
+          if (!tplId && Object.prototype.hasOwnProperty.call(ev, 'template_id')) tplId = ev.template_id || tplId;
+          // look into meta JSON for a template_id or repeatOption
           try {
-            // Try delete by original_event_id first
-            await prisma.archivedEvent.delete({ where: { original_event_id: id } });
-            return res.status(200).json({ success: true, message: 'Archived event deleted' });
-          } catch (err2) {
-            // If not found, attempt to delete by archived record id
+            if (!tplId && ev.meta && typeof ev.meta === 'object') {
+              tplId = ev.meta.template_id || ev.meta.templateId || tplId;
+            }
+          } catch (e) { /* ignore */ }
+          // also attempt to parse description for embedded [META] JSON used by some clients
+          if (!tplId && ev.description && typeof ev.description === 'string') {
             try {
-              await prisma.archivedEvent.delete({ where: { id } });
-              return res.status(200).json({ success: true, message: 'Archived event deleted' });
-            } catch (err3) {
-              return res.status(404).json({ code: 'NOT_FOUND', message: 'Event not found' });
+              const m = String(ev.description).match(/\[META\]([\s\S]*?)\[META\]/);
+              if (m && m[1]) {
+                const parsed = JSON.parse(m[1]);
+                tplId = parsed?.template_id || parsed?.templateId || tplId;
+              }
+            } catch (e) { /* ignore parse errors */ }
+          }
+        }
+      } catch (e) {
+        console.warn('[events/:id] safeFindEvent failed while discovering template/repeat metadata', e);
+      }
+
+      // Proceed even when template_id / repeatOption are missing — we'll attempt
+      // metadata-based and best-effort title/time matching below. This makes the
+      // 'Delete All' action more forgiving for materialized series without
+      // explicit template linkage.
+
+      // Perform deletion by scanning event meta/description fields (schema may not include template_id/raw columns)
+      try {
+        const result = await prisma.$transaction(async (tx) => {
+          // Fetch all active events with minimal fields we know exist in the schema
+          const allActive = await tx.event.findMany({ select: { id: true, title: true, date: true, time: true, description: true, meta: true } });
+          const idsToDelete = new Set();
+
+          for (const e of allActive) {
+            try {
+              // Check meta JSON if available
+              if (tplId && e.meta && typeof e.meta === 'object') {
+                if (String(e.meta.template_id || e.meta.templateId || '') === String(tplId)) { idsToDelete.add(e.id); continue; }
+              }
+              if (repeatOptionQuery && e.meta && typeof e.meta === 'object') {
+                if (String(e.meta.repeatOption || e.meta.repeat_option || e.meta.repeatoption || '') === String(repeatOptionQuery)) { idsToDelete.add(e.id); continue; }
+              }
+
+              // Check description for embedded [META] JSON block
+              if (e.description && typeof e.description === 'string') {
+                const m = String(e.description).match(/\[META\]([\s\S]*?)\[META\]/);
+                if (m && m[1]) {
+                  try {
+                    const parsed = JSON.parse(m[1]);
+                    if (tplId && String(parsed.template_id || parsed.templateId || '') === String(tplId)) { idsToDelete.add(e.id); continue; }
+                    if (repeatOptionQuery && String(parsed.repeatOption || parsed.repeat_option || parsed.repeatoption || '') === String(repeatOptionQuery)) { idsToDelete.add(e.id); continue; }
+                  } catch (pe) { /* ignore parse errors */ }
+                }
+              }
+
+            } catch (inner) { /* ignore per-event errors */ }
+          }
+
+          // Also attempt to delete archived events by scanning description (archivedEvent doesn't have meta)
+          const allArchived = await tx.archivedEvent.findMany({ select: { id: true, original_event_id: true, description: true } });
+          const archivedIdsToDelete = new Set();
+          for (const e of allArchived) {
+            try {
+              if (e.description && typeof e.description === 'string') {
+                const m = String(e.description).match(/\[META\]([\s\S]*?)\[META\]/);
+                if (m && m[1]) {
+                  try {
+                    const parsed = JSON.parse(m[1]);
+                    if (tplId && String(parsed.template_id || parsed.templateId || '') === String(tplId)) { archivedIdsToDelete.add(e.id); continue; }
+                    if (repeatOptionQuery && String(parsed.repeatOption || parsed.repeat_option || parsed.repeatoption || '') === String(repeatOptionQuery)) { archivedIdsToDelete.add(e.id); continue; }
+                  } catch (pe) {}
+                }
+              }
+            } catch (inner) {}
+          }
+
+          // Delete active events
+          let deletedActive = { count: 0 };
+          if (idsToDelete.size > 0) {
+            deletedActive = await tx.event.deleteMany({ where: { id: { in: Array.from(idsToDelete) } } });
+          }
+
+          // Delete archived events
+          let deletedArchived = { count: 0 };
+          if (archivedIdsToDelete.size > 0) {
+            deletedArchived = await tx.archivedEvent.deleteMany({ where: { id: { in: Array.from(archivedIdsToDelete) } } });
+          }
+          // If nothing matched via meta/description, try a best-effort match by title and time
+          if ((idsToDelete.size === 0) && (archivedIdsToDelete.size === 0)) {
+            try {
+              // Attempt to load the target event's title/time to find similar occurrences
+              const target = await tx.event.findUnique({ where: { id }, select: { title: true, time: true } }) || await tx.archivedEvent.findFirst({ where: { original_event_id: id }, select: { title: true, time: true } });
+              if (target && target.title) {
+                const titleMatch = String(target.title).trim();
+                const timeMatch = target.time || null;
+                const similarActive = await tx.event.findMany({ where: { title: titleMatch, time: timeMatch }, select: { id: true } });
+                for (const s of similarActive) idsToDelete.add(s.id);
+                const similarArchived = await tx.archivedEvent.findMany({ where: { title: titleMatch, time: timeMatch }, select: { id: true } });
+                for (const s of similarArchived) archivedIdsToDelete.add(s.id);
+
+                if (idsToDelete.size > 0) {
+                  deletedActive = await tx.event.deleteMany({ where: { id: { in: Array.from(idsToDelete) } } });
+                }
+                if (archivedIdsToDelete.size > 0) {
+                  deletedArchived = await tx.archivedEvent.deleteMany({ where: { id: { in: Array.from(archivedIdsToDelete) } } });
+                }
+              }
+            } catch (bestErr) {
+              console.warn('[events/:id] Best-effort title/time bulk delete failed:', bestErr);
             }
           }
+
+          return { deletedActive: deletedActive.count, deletedArchived: deletedArchived.count, total: deletedActive.count + deletedArchived.count };
+        });
+
+        console.log(`[events/:id] Deleted series by metadata: ${result.total} events (${result.deletedActive} active, ${result.deletedArchived} archived)`);
+        return res.status(200).json({ success: true, message: 'Series deleted', deletedCount: result.total, details: { active: result.deletedActive, archived: result.deletedArchived } });
+      } catch (txErr) {
+        console.error('[events/:id] DELETE series transaction error:', txErr);
+        return res.status(500).json({ code: 'DELETE_SERIES_FAILED', message: 'Failed to delete event series', details: txErr?.message || String(txErr) });
+      }
+    }
+    
+    // Single event delete (scope !== 'all')
+    try {
+      await prisma.event.delete({ where: { id } });
+      return res.status(200).json({ success: true, message: 'Event deleted' });
+    } catch (err) {
+      console.error(`[events/:id] DELETE error for id=${id}:`, err);
+      
+      // Try fallback
+      if (err && (err.code === 'P1001' || String(err.message || '').includes("Can't reach database"))) {
+        try {
+          const local = fallback.delete(id);
+          if (local) return res.status(200).json({ success: true, message: 'Event deleted', event: local });
+        } catch (fe) {
+          console.error('[events/:id] fallback.delete error:', fe);
+        }
+      }
+      
+      // Try archived by original_event_id
+      try {
+        await prisma.archivedEvent.delete({ where: { original_event_id: id } });
+        return res.status(200).json({ success: true, message: 'Archived event deleted' });
+      } catch (err2) {
+        // Try by id
+        try {
+          await prisma.archivedEvent.delete({ where: { id } });
+          return res.status(200).json({ success: true, message: 'Archived event deleted' });
+        } catch (err3) {
+          return res.status(404).json({ code: 'NOT_FOUND', message: 'Event not found' });
+        }
+      }
+          }
+        } catch (error) {
+          console.error('[events/:id] DELETE outer error:', error);
+          return res.status(500).json({ 
+            code: 'INTERNAL_ERROR', 
+            message: 'Delete operation failed', 
+            details: error?.message 
+          });
         }
       }
       

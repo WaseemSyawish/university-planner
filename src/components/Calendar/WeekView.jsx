@@ -1,3 +1,4 @@
+import EditScopeModal from '@/components/Timetable/EditScopeModal';
 import React, { useMemo, useRef, useState, useEffect } from 'react';
 import { Plus, Trash2 } from 'lucide-react';
 import { buildLocalDateFromParts, formatTimeFromParts } from '../../lib/dateHelpers';
@@ -32,6 +33,34 @@ export default function WeekView({ weekDates = [], timeSlots = [], classes = [],
   const [slotRowPx, setSlotRowPx] = useState(72);
   const firstRowRef = useRef(null);
   const [openDeleteMenu, setOpenDeleteMenu] = useState(null);
+  const [showDeleteScopeModal, setShowDeleteScopeModal] = useState(false);
+  const [pendingDeleteEvent, setPendingDeleteEvent] = useState(null);
+
+  function DeleteMenu({ evItem, onClose, onEventDelete }) {
+    return (
+      <div style={{ position: 'absolute', right: 0, top: 28, background: 'var(--card-bg)', border: '1px solid rgba(2,6,23,0.06)', borderRadius: 8, padding: 8, boxShadow: '0 6px 18px rgba(2,6,23,0.08)' }}>
+        <button
+          onClick={(e) => {
+            e.stopPropagation();
+            setPendingDeleteEvent(evItem);
+            setShowDeleteScopeModal(true);
+            onClose?.();
+          }}
+          className="block text-left w-full p-1 px-2 rounded hover:bg-gray-100"
+        >Delete occurrence</button>
+
+        <button
+          onClick={(e) => {
+            e.stopPropagation();
+            setPendingDeleteEvent(evItem);
+            setShowDeleteScopeModal(true);
+            onClose?.();
+          }}
+          className="block text-left w-full p-1 px-2 rounded hover:bg-gray-100 mt-1"
+        >Delete series</button>
+      </div>
+    );
+  }
 
   function parseTimeToMinutes(t) {
     if (!t) return null;
@@ -140,6 +169,56 @@ export default function WeekView({ weekDates = [], timeSlots = [], classes = [],
           })}
         </div>
       </div>
+      <EditScopeModal
+        visible={showDeleteScopeModal}
+        mode={'delete'}
+        onClose={() => { setShowDeleteScopeModal(false); setPendingDeleteEvent(null); }}
+        onConfirm={async (scope) => {
+          setShowDeleteScopeModal(false);
+          const ev = pendingDeleteEvent;
+          if (!ev) return;
+          try {
+            const tplId = ev.template_id || (ev.raw && (ev.raw.template_id || ev.raw.templateId)) || null;
+            // Single-delete or no template id -> straightforward delete
+            if (scope === 'single' || !tplId) {
+              try {
+                await fetch('/api/events/' + encodeURIComponent(ev.id), { method: 'DELETE' });
+              } catch (e) { console.warn('Single delete failed', e); }
+              if (typeof onEventDelete === 'function') onEventDelete(ev, { scope: 'single' });
+              return;
+            }
+
+            // Preferred path: delegate to centralized provider handler if exposed
+            try {
+              const schedulerHandlers = (typeof window !== 'undefined') ? window.__schedulerHandlers : null;
+              if (schedulerHandlers && typeof schedulerHandlers.handleDeleteEvent === 'function') {
+                await schedulerHandlers.handleDeleteEvent(ev.id, 'all');
+                if (typeof onEventDelete === 'function') onEventDelete(ev, { scope: 'all' });
+                return;
+              }
+            } catch (e) {
+              console.warn('Provider handler delegation failed, falling back', e);
+            }
+
+            // Fallback: existing inline bulk-delete by template id
+            try {
+              const list = await fetch('/api/events').then(r => r.ok ? r.json().catch(() => null) : null);
+              const eventsList = Array.isArray(list?.events) ? list.events : (Array.isArray(list) ? list : []);
+              const toDelete = eventsList.filter(ei => {
+                const evTpl = ei && (ei.template_id || (ei.raw && (ei.raw.template_id || ei.raw.templateId))) || null;
+                if (!evTpl || String(evTpl) !== String(tplId)) return false;
+                return true;
+              });
+              for (const p of toDelete) {
+                try { await fetch('/api/events/' + encodeURIComponent(p.id), { method: 'DELETE' }); } catch (e) { console.warn('Bulk delete failed for event', p && p.id, e); }
+              }
+              if (typeof onEventDelete === 'function') onEventDelete(ev, { scope: 'all' });
+            } catch (err) {
+              console.warn('Fallback bulk delete failed', err);
+            }
+          } catch (err) { console.warn('Delete scope failed', err); }
+        }}
+      />
 
       {/* body: removed internal scrolling so the page scrollbar is used; add horizontal separators */}
       <div className={`${compact ? 'text-sm' : 'text-base'}`}>
@@ -367,43 +446,7 @@ export default function WeekView({ weekDates = [], timeSlots = [], classes = [],
                             </button>
 
                             {openDeleteMenu === evItem.id && (
-                              <div onClick={(e) => e.stopPropagation()} style={{ position: 'absolute', right: 0, top: 28, background: 'var(--card-bg)', border: '1px solid rgba(2,6,23,0.06)', borderRadius: 8, padding: 8, boxShadow: '0 6px 18px rgba(2,6,23,0.08)' }}>
-                                <button
-                                  onClick={async (e) => {
-                                    e.stopPropagation();
-                                    try {
-                                      if (!confirm('Delete this event occurrence?')) return;
-                                      const resp = await fetch('/api/events/' + encodeURIComponent(evItem.id), { method: 'DELETE' });
-                                      if (!resp.ok) throw new Error('Delete failed');
-                                      setOpenDeleteMenu(null);
-                                      if (typeof onEventDelete === 'function') onEventDelete(evItem, { scope: 'single' });
-                                      else window.location.reload();
-                                    } catch (err) {
-                                      console.error('Delete failed', err);
-                                      alert('Failed to delete event');
-                                    }
-                                  }}
-                                  className="block text-left w-full p-1 px-2 rounded hover:bg-gray-100"
-                                >Delete occurrence</button>
-
-                                <button
-                                  onClick={async (e) => {
-                                    e.stopPropagation();
-                                    try {
-                                      if (!confirm('Delete the entire series (all materialized occurrences and the template)?')) return;
-                                      const resp = await fetch('/api/events/' + encodeURIComponent(evItem.id) + '?scope=all', { method: 'DELETE' });
-                                      if (!resp.ok) throw new Error('Delete series failed');
-                                      setOpenDeleteMenu(null);
-                                      if (typeof onEventDelete === 'function') onEventDelete(evItem, { scope: 'all' });
-                                      else window.location.reload();
-                                    } catch (err) {
-                                      console.error('Delete series failed', err);
-                                      alert('Failed to delete series');
-                                    }
-                                  }}
-                                  className="block text-left w-full p-1 px-2 rounded hover:bg-gray-100 mt-1"
-                                >Delete series</button>
-                              </div>
+                                <DeleteMenu evItem={evItem} onClose={() => setOpenDeleteMenu(null)} onEventDelete={onEventDelete} />
                             )}
                           </div>
                         </div>

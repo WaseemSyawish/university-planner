@@ -12,6 +12,8 @@ export default function EventModal({ visible = true, selectedEvent, modalMode = 
   const [deleteScope, setDeleteScope] = useState('single'); // 'single' | 'all'
   const [confirmingDelete, setConfirmingDelete] = useState(false);
   const [showScopeModal, setShowScopeModal] = useState(false);
+  const [pendingSavePayload, setPendingSavePayload] = useState(null);
+  const [showEditScopeModal, setShowEditScopeModal] = useState(false);
   const titleRef = useRef(null);
 
   // Only reinitialize the form when a different event is opened for edit.
@@ -70,19 +72,57 @@ export default function EventModal({ visible = true, selectedEvent, modalMode = 
       time: formData.startTime,
       endTime: formData.endTime,
       durationMinutes: formData.durationMinutes,
+      type: formData.type,
+      color: formData.color,
       courseId: formData.selectedCourse || undefined,
       room: formData.room || undefined,
       location: formData.room || undefined
     };
     try { console.log('EventModal saving payload (sanitized):', payload); } catch (e) {}
+    // If this event is part of a repeating series, ask user whether to apply
+    // edits to only this instance or broader scope. We consider an event to be
+    // part of a series when it has an explicit repeatOption or a template id
+    // on the raw payload.
+    const isSeries = !!(
+      selectedEvent && (
+        selectedEvent.repeatOption ||
+        selectedEvent.template_id ||
+        selectedEvent.templateId ||
+        (selectedEvent.raw && (selectedEvent.raw.template_id || selectedEvent.raw.templateId))
+      )
+    );
+    if (isSeries) {
+      // Store pending payload and show scope chooser modal for edits
+      setPendingSavePayload(payload);
+      setShowEditScopeModal(true);
+      return;
+    }
+
     onSave && onSave(payload);
   }
 
-  function handleDeleteConfirm() {
+  async function handleDeleteConfirm() {
     // pass the full selected event to the delete handler so caller can determine id/template behavior
     if (!selectedEvent) return;
     // send delete scope as a second param so callers can handle series deletion
-    onDelete && onDelete(selectedEvent, deleteScope);
+    if (onDelete) {
+      try { onDelete(selectedEvent, deleteScope); } catch (e) {}
+    } else {
+      // Fallback: if a scheduler handler is exposed on window, use it (used by timetable page)
+      try {
+        const schedulerHandlers = (typeof window !== 'undefined') ? window.__schedulerHandlers : null;
+        if (schedulerHandlers && typeof schedulerHandlers.handleDeleteEvent === 'function') {
+          // map 'all' scope through; provider expects (id, scope?)
+          await schedulerHandlers.handleDeleteEvent(selectedEvent.id, deleteScope === 'all' ? 'all' : undefined);
+        } else {
+          // last-resort: try direct API delete for the single id (will delete one instance)
+          try { await fetch(`/api/events/${encodeURIComponent(selectedEvent.id)}`, { method: 'DELETE' }); } catch (e) {}
+        }
+      } catch (e) {
+        // swallow — best-effort delete
+      }
+    }
+
     onClose && onClose();
   }
 
@@ -92,16 +132,10 @@ export default function EventModal({ visible = true, selectedEvent, modalMode = 
         <>
           <div className="flex items-center">
             {modalMode === 'edit' && (
-              !confirmingDelete ? (
-                <button onClick={() => setConfirmingDelete(true)} className="px-3 py-2 text-red-600 hover:bg-red-50 rounded-md flex items-center gap-2 mr-4">
-                  <Trash2 className="w-4 h-4" /> Delete
-                </button>
-              ) : (
-                <div className="flex items-center gap-2 mr-4">
-                  <button onClick={() => setConfirmingDelete(false)} className="px-3 py-1 border rounded-md text-gray-700">Cancel</button>
-                  <button onClick={() => setShowScopeModal(true)} className="px-3 py-1 bg-red-600 text-white rounded-md">Confirm Delete</button>
-                </div>
-              )
+              // Open the delete scope chooser immediately for clarity and discoverability
+              <button onClick={() => setShowScopeModal(true)} className="px-3 py-2 text-red-600 hover:bg-red-50 rounded-md flex items-center gap-2 mr-4">
+                <Trash2 className="w-4 h-4" /> Delete
+              </button>
             )}
           </div>
 
@@ -116,11 +150,33 @@ export default function EventModal({ visible = true, selectedEvent, modalMode = 
         </div>
       </ModalShell>
       <RepeatOptionsModal visible={showRepeatModal} value={formData.repeatOption} onClose={() => setShowRepeatModal(false)} onSave={(val) => setFormData(fd => ({ ...(fd || {}), repeatOption: val }))} />
-      <EditScopeModal visible={showScopeModal} mode={'delete'} onClose={() => setShowScopeModal(false)} onConfirm={(scope) => {
+      <EditScopeModal visible={showScopeModal} mode={'delete'} onClose={() => setShowScopeModal(false)} onConfirm={async (scope) => {
         // when user confirms scope, call delete handler
         setShowScopeModal(false);
-        onDelete && onDelete(selectedEvent, scope);
+        if (onDelete) {
+          try { onDelete(selectedEvent, scope); } catch (e) {}
+        } else {
+          try {
+            const schedulerHandlers = (typeof window !== 'undefined') ? window.__schedulerHandlers : null;
+            if (schedulerHandlers && typeof schedulerHandlers.handleDeleteEvent === 'function') {
+              await schedulerHandlers.handleDeleteEvent(selectedEvent.id, scope === 'all' ? 'all' : undefined);
+            } else {
+              // Best-effort direct API call
+              try { await fetch(`/api/events/${encodeURIComponent(selectedEvent.id)}`, { method: 'DELETE' }); } catch (e) {}
+            }
+          } catch (e) {}
+        }
         onClose && onClose();
+      }} />
+      <EditScopeModal visible={showEditScopeModal} mode={'edit'} onClose={() => { setShowEditScopeModal(false); setPendingSavePayload(null); }} onConfirm={(scope) => {
+        // when user confirms edit scope, call save handler with chosen scope
+        setShowEditScopeModal(false);
+        try {
+          if (pendingSavePayload) onSave && onSave(pendingSavePayload, scope);
+        } finally {
+          setPendingSavePayload(null);
+          onClose && onClose();
+        }
       }} />
     </CreateStepModal>
   );

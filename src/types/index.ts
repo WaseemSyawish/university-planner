@@ -7,24 +7,52 @@ export type IconSvgProps = SVGProps<SVGSVGElement> & {
 
 // SchedulerTypes.ts
 
-// Define event type
 export interface Event {
   id: string;
   title: string;
-  description?: string;
-  color?: string;
+  startDate: string | Date;
+  endDate: string | Date;
   type?: string;
-  startDate: Date;
-  endDate: Date;
-  variant?: Variant;
-  // Optional recurrence metadata (rrule, selected option id, exceptions/series)
-  recurrence?: {
-    id?: string; // option id (e.g. 'daily', 'weekly', 'custom')
-    rrule?: string | null; // RFC5545 RRULE string when available
-    exdates?: string[]; // ISO strings of excluded dates
-    seriesId?: string; // id linking events in a series
+  description?: string;
+  location?: string;
+  room?: string; // legacy field
+  color?: string;
+  colorKey?: string;
+  color_key?: string;
+  variant?: string;
+  completed?: boolean;
+  archived?: boolean;
+  course_id?: string | null;
+  courseId?: string | null;
+  user_id?: string;
+  userId?: string;
+  date?: string | Date;
+  time?: string;
+  end_date?: string | Date;
+  
+  // Recurring event fields
+  template_id?: string | null;
+  templateId?: string | null;
+  
+  // Raw data storage (may contain additional fields)
+  raw?: {
+    template_id?: string;
+    templateId?: string;
+    color?: string;
+    color_key?: string;
+    colorKey?: string;
     [key: string]: any;
   };
+  
+  // Relations
+  courses?: any;
+  
+  // Timestamps
+  created_at?: string | Date;
+  updated_at?: string | Date;
+  
+  // Allow additional properties
+  [key: string]: any;
 }
 
 // Define the state interface for the scheduler
@@ -61,11 +89,13 @@ export interface Handlers {
     zIndex: number;
   };
   handleAddEvent: (event: Event) => void;
-  handleUpdateEvent: (event: Event, id: string) => void;
+  handleUpdateEvent: (event: Event, id: string, scope?: string) => void;
+  // (Deprecated) handleUpdateEventScoped removed; use handleUpdateEvent with optional scope
   // local-only helpers: update provider state without performing network persistence
   handleLocalAddEvent?: (event: Event) => void;
   handleLocalUpdateEvent?: (event: Event) => void;
-  handleDeleteEvent: (id: string) => void;
+  // Accept optional scope (e.g. 'single' | 'all') — may be async when performing network operations
+  handleDeleteEvent: (id: string, scope?: string) => Promise<any> | void;
 }
 
 // Define getters interface

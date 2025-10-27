@@ -9,9 +9,10 @@ import { useModal } from "@/providers/modal-context";
 import SelectDate from "@/components/schedule/_components/add-event-components/select-date";
 import { SubmitHandler, useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
-import { EventFormData, eventSchema, Variant, Event } from "@/types/index";
+import { EventFormData, eventSchema, Variant, Event, variants as VARIANTS } from "@/types/index";
 import { useScheduler } from "@/providers/schedular-provider";
 import { v4 as uuidv4 } from "uuid";
+import EditScopeModal from "@/components/Timetable/EditScopeModal";
 
 const COLORS = [
   { key: "blue", name: "Blue", variant: "primary" as Variant, class: "bg-blue-500", hover: "hover:bg-blue-600" },
@@ -61,8 +62,28 @@ export default function AddEventModal({
   CustomAddEventModal?: React.FC<{ register: any; errors: any }>;
 }) {
   const { setClose, data } = useModal();
-  const eventData = (data?.default ?? null) as Event | null | undefined;
+  // Modal data may be provided in several shapes depending on caller:
+  // - fetch callback returns the event directly -> data = { default: { /* event */ } }
+  // - fetch callback returns { default: event } -> data = { default: { default: event } }
+  // - some callers may open modal with the event object directly -> data = { /* event */ }
+  // Normalize these shapes and pick the underlying event object when present.
+  const fetched = data?.default ?? data ?? null as any;
+  const unwrapped = fetched && (fetched.default ?? fetched) as any;
+  const eventData = unwrapped && typeof unwrapped === 'object' && Object.keys(unwrapped).length ? (unwrapped as Event) : null;
   const { handlers } = useScheduler();
+
+  // Helper: parse incoming date-like values (string or Date) into Date objects
+  const parseToDate = (v: any): Date => {
+    if (!v) return new Date();
+    if (Object.prototype.toString.call(v) === '[object Date]') return v as Date;
+    try {
+      const d = new Date(String(v));
+      if (isNaN(d.getTime())) return new Date();
+      return d;
+    } catch (e) {
+      return new Date();
+    }
+  };
 
   const [selectedColor, setSelectedColor] = useState<string>(
     (eventData as any)?.color || "blue"
@@ -74,6 +95,9 @@ export default function AddEventModal({
   const [typeOpen, setTypeOpen] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
+  const [showEditScope, setShowEditScope] = useState(false);
+  const [pendingSave, setPendingSave] = useState(false);
+  const [pendingBody, setPendingBody] = useState<any>(null);
   const [selectedByDays, setSelectedByDays] = useState<number[]>([]);
   const [intervalWeeks, setIntervalWeeks] = useState<number>(1);
   const [createTemplate, setCreateTemplate] = useState(false);
@@ -81,6 +105,11 @@ export default function AddEventModal({
   const [materializeUntil, setMaterializeUntil] = useState<string | null>(null);
   const [modalPage, setModalPage] = useState<number>(0);
   const [recurrenceMode, setRecurrenceMode] = useState<'none' | 'count' | 'until'>('none');
+  const [confirmingDelete, setConfirmingDelete] = useState(false);
+  const [showDeleteScope, setShowDeleteScope] = useState(false);
+
+  // Safe default variant: ensure it matches the Variant union
+  const defaultVariant: Variant = (eventData && typeof eventData.variant === 'string' && (VARIANTS as readonly string[]).includes(eventData.variant)) ? (eventData.variant as Variant) : 'primary';
 
   const { register, handleSubmit, reset, formState: { errors }, setValue, getValues } = useForm<EventFormData>({
     resolver: zodResolver(eventSchema),
@@ -88,15 +117,15 @@ export default function AddEventModal({
       title: "",
       startDate: new Date(),
       endDate: new Date(),
-      variant: eventData?.variant || "primary",
+      variant: defaultVariant,
       color: (eventData as any)?.color || "blue",
       type: (eventData as any)?.type || "assignment",
     },
   });
 
   const selectDateData = useMemo(() => ({
-    startDate: eventData?.startDate || new Date(),
-    endDate: eventData?.endDate || new Date(),
+    startDate: parseToDate(eventData?.startDate),
+    endDate: parseToDate(eventData?.endDate),
   }), [eventData?.startDate, eventData?.endDate]);
 
   useEffect(() => {
@@ -105,9 +134,9 @@ export default function AddEventModal({
       const type = (eventData as any)?.type || "assignment";
       reset({
         title: eventData.title,
-        startDate: eventData.startDate,
-        endDate: eventData.endDate,
-        variant: eventData.variant || "primary",
+        startDate: parseToDate((eventData as any).startDate),
+        endDate: parseToDate((eventData as any).endDate),
+        variant: (typeof eventData.variant === 'string' && (VARIANTS as readonly string[]).includes(eventData.variant)) ? (eventData.variant as Variant) : 'primary',
         color: color,
         type: type,
       });
@@ -135,6 +164,84 @@ export default function AddEventModal({
       prev.includes(day) ? prev.filter(d => d !== day) : [...prev, day].sort()
     );
   };
+
+  // Helper: apply pending body to chosen scope (moved to component scope so modal can call it)
+  async function applyPendingBody(scope: string) {
+    if (!eventData || !pendingBody) return;
+    try {
+      setSubmitting(true);
+      const evAny2 = eventData as any;
+      const tplId = evAny2.template_id || (evAny2.raw && (evAny2.raw.template_id || evAny2.raw.templateId)) || null;
+
+      // If single or no template, just patch the individual event
+      if (scope === 'single' || !tplId) {
+        // Prefer to route through provider handlers so parent page can persist
+        // the change (and accept scope). Fall back to direct fetch if handler
+        // is not present.
+        const updatedEvent = { ...(eventData as any), ...(pendingBody || {}) } as Event;
+        if (handlers && typeof handlers.handleUpdateEvent === 'function') {
+          try {
+            await handlers.handleUpdateEvent(updatedEvent as any, eventData.id, 'single');
+          } catch (e) {
+            // If provider handler failed, attempt direct fetch as fallback
+            console.warn('handlers.handleUpdateEvent failed, falling back to direct PATCH', e);
+            const resp = await fetch(`/api/events/${encodeURIComponent(eventData.id)}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(pendingBody) });
+            if (!resp.ok) throw new Error(`Update failed ${resp.status}`);
+          }
+        } else {
+          const resp = await fetch(`/api/events/${encodeURIComponent(eventData.id)}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(pendingBody) });
+          if (!resp.ok) throw new Error(`Update failed ${resp.status}`);
+        }
+
+        // Optimistically update local provider state
+        handlers.handleLocalUpdateEvent?.({ ...(eventData as any), ...(pendingBody || {}) } as any);
+        setPendingBody(null);
+        setPendingSave(false);
+        setShowEditScope(false);
+        setClose();
+        return;
+      }
+
+      // For 'future' and 'all', fetch all events and patch those matching template
+      const listResp = await fetch('/api/events');
+      if (!listResp.ok) throw new Error('Failed to list events for bulk update');
+      const listBody = await listResp.json().catch(() => null);
+      const eventsList = Array.isArray(listBody?.events) ? listBody.events : (Array.isArray(listBody) ? listBody : []);
+      const baseDate = new Date((eventData as any).date || ((eventData as any).raw && (eventData as any).raw.date) || eventData.startDate || null);
+      const toApply = eventsList.filter((ev) => {
+        const evAny = ev as any;
+        const evTpl = evAny.template_id || (evAny.raw && (evAny.raw.template_id || evAny.raw.templateId)) || null;
+        if (!evTpl || String(evTpl) !== String(tplId)) return false;
+        if (scope === 'future') {
+          try {
+            const evDate = new Date(ev.date || ev.startDate || ev.start_date || ev.startDate);
+            return evDate >= baseDate;
+          } catch (e) { return false; }
+        }
+        return true;
+      });
+
+      // Patch each matched event sequentially (keeps server load reasonable)
+      for (const ev of toApply) {
+        try {
+          await fetch(`/api/events/${encodeURIComponent(ev.id)}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(pendingBody) });
+        } catch (e) {
+          console.warn('Bulk update failed for event', ev && ev.id, e);
+        }
+      }
+
+      // Optimistically update local provider by updating current event
+      handlers.handleLocalUpdateEvent?.({ ...(eventData as any), ...(pendingBody || {}) } as any);
+      setPendingBody(null);
+      setPendingSave(false);
+      setShowEditScope(false);
+      setClose();
+    } catch (err) {
+      setSaveError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setSubmitting(false);
+    }
+  }
 
   const onSubmit: SubmitHandler<EventFormData> = async (formData) => {
     setSaveError(null);
@@ -189,7 +296,7 @@ export default function AddEventModal({
 
       let serverEvent: any;
       
-      if (!eventData?.id) {
+  if (!eventData?.id) {
         const resp = await fetch("/api/events", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -216,12 +323,23 @@ export default function AddEventModal({
         const finalEvent: Event = {
           ...newEvent,
           id: serverEvent?.id || newEvent.id,
-          startDate: serverEvent?.startDate || newEvent.startDate,
-          endDate: serverEvent?.endDate || newEvent.endDate,
+          startDate: parseToDate(serverEvent?.startDate || newEvent.startDate),
+          endDate: parseToDate(serverEvent?.endDate || newEvent.endDate),
           ...(serverEvent?.color && { color: serverEvent.color }),
         };
         handlers.handleLocalAddEvent?.(finalEvent);
       } else {
+        // If the event is part of a recurrence/template, ask scope before applying edits
+  const evAny = eventData as any;
+  const isSeries = !!(evAny && (evAny.repeatOption || evAny.template_id || (evAny.raw && (evAny.raw.template_id || evAny.raw.templateId))));
+        if (isSeries) {
+            // Show edit scope modal and apply update based on user's choice
+            setPendingSave(true);
+            setPendingBody(body);
+            setShowEditScope(true);
+            return;
+        }
+
         const resp = await fetch(`/api/events/${encodeURIComponent(eventData.id)}`, {
           method: "PATCH",
           headers: { "Content-Type": "application/json" },
@@ -248,12 +366,13 @@ export default function AddEventModal({
         const finalEvent: Event = {
           ...newEvent,
           id: eventData.id,
-          startDate: serverEvent?.startDate || newEvent.startDate,
-          endDate: serverEvent?.endDate || newEvent.endDate,
+          startDate: parseToDate(serverEvent?.startDate || newEvent.startDate),
+          endDate: parseToDate(serverEvent?.endDate || newEvent.endDate),
           ...(serverEvent?.color && { color: serverEvent.color }),
         };
         handlers.handleLocalUpdateEvent?.(finalEvent);
       }
+      
       setTimeout(() => setClose(), 50);
     } catch (err) {
       setSaveError(err instanceof Error ? err.message : String(err));
@@ -261,6 +380,46 @@ export default function AddEventModal({
       setSubmitting(false);
     }
   };
+
+  async function handleDeleteScopeConfirm(scope: string) {
+    if (!eventData) return;
+    try {
+      // close the scope modal UI and the small confirm strip
+      setShowDeleteScope(false);
+      setConfirmingDelete(false);
+
+      if (scope === 'single') {
+        // Prefer provider handler so parent pages can intercept
+        try {
+          handlers.handleDeleteEvent?.(eventData.id);
+        } catch (e) {
+          console.warn('handleDeleteEvent failed', e);
+        }
+        setClose();
+        return;
+      }
+
+      // 'all' selected: delegate to provider which centralizes server-side
+      // bulk delete and fallback strategies (refreshes provider state).
+      try {
+        await handlers.handleDeleteEvent?.(eventData.id, 'all');
+      } catch (e) {
+        console.warn('handlers.handleDeleteEvent(scope=all) failed', e);
+        // As a last-resort fallback, attempt best-effort server bulk-delete
+        try {
+          const evAny2 = eventData as any;
+          const tplId = evAny2 && (evAny2.template_id || (evAny2.raw && (evAny2.raw.template_id || evAny2.raw.templateId)) || evAny2.templateId) ? (evAny2.template_id || (evAny2.raw && (evAny2.raw.template_id || evAny2.raw.templateId)) || evAny2.templateId) : null;
+          const url = `/api/events/${encodeURIComponent(eventData.id)}?scope=all${tplId ? `&templateId=${encodeURIComponent(tplId)}` : ''}`;
+          await fetch(url, { method: 'DELETE' });
+        } catch (e) {}
+        try { handlers.handleDeleteEvent?.(eventData.id); } catch (e) {}
+      }
+
+      setClose();
+    } catch (err) {
+      console.warn('Delete scope handler error', err);
+    }
+  }
 
   // Recurrence page - REDESIGNED with compact layout
   if (modalPage === 1) {
@@ -577,13 +736,36 @@ export default function AddEventModal({
       `}} />
       
       <div className="p-5 max-w-2xl mx-auto">
-        <div className="mb-4">
-          <h2 className="text-lg font-bold text-gray-900 dark:text-white mb-0.5">
-            {eventData?.id ? 'Edit Event' : 'Create Event'}
-          </h2>
-          <p className="text-xs text-gray-400 dark:text-slate-200">
-            {eventData?.id ? 'Update event details' : 'Add a new event to your schedule'}
-          </p>
+        <div className="mb-4 flex items-start justify-between">
+          <div>
+            <h2 className="text-lg font-bold text-gray-900 dark:text-white mb-0.5">
+              {eventData?.id ? 'Edit Event' : 'Create Event'}
+            </h2>
+            <p className="text-xs text-gray-400 dark:text-slate-200">
+              {eventData?.id ? 'Update event details' : 'Add a new event to your schedule'}
+            </p>
+          </div>
+          {/* Delete control for edit modal (show only when editing an existing event) */}
+          {/* Consider several possible id fields so delete shows for events using different shapes */}
+          {(() => {
+            const anyEv: any = eventData;
+            const candidateId = eventData && (anyEv.id ?? anyEv._id ?? anyEv.eventId ?? anyEv.uid);
+            return (eventData && candidateId !== undefined && candidateId !== null && String(candidateId) !== '')
+          })() && (
+            <div className="flex items-center">
+              {!confirmingDelete ? (
+                <button onClick={() => setConfirmingDelete(true)} className="px-3 py-2 text-red-600 hover:bg-red-50 rounded-md flex items-center gap-2">
+                  <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round"><path d="M3 6h18" /><path d="M8 6v14a2 2 0 0 0 2 2h4a2 2 0 0 0 2-2V6" /><path d="M10 11v6" /><path d="M14 11v6" /><path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2" /></svg>
+                  Delete
+                </button>
+              ) : (
+                <div className="flex items-center gap-2">
+                  <button onClick={() => setConfirmingDelete(false)} className="px-3 py-1 border rounded-md text-gray-700">Cancel</button>
+                  <button onClick={() => setShowDeleteScope(true)} className="px-3 py-1 bg-red-600 text-white rounded-md">Confirm Delete</button>
+                </div>
+              )}
+            </div>
+          )}
         </div>
 
         <div className="space-y-4">
@@ -892,6 +1074,22 @@ export default function AddEventModal({
                   )}
                 </Button>
               </div>
+              {/* Edit scope modal for recurring events */}
+              <EditScopeModal visible={showEditScope} mode={'edit'} onClose={() => { setShowEditScope(false); setPendingSave(false); setPendingBody(null); }} onConfirm={(scope) => {
+                // apply pending body based on user's choice
+                setShowEditScope(false);
+                (async () => {
+                  await applyPendingBody(scope);
+                })();
+              }} />
+              {/* Delete scope modal for deletions initiated from this edit modal */}
+              <EditScopeModal visible={showDeleteScope} mode={'delete'} onClose={() => { setShowDeleteScope(false); setConfirmingDelete(false); }} onConfirm={(scope) => {
+                // apply delete scope for the currently-open event
+                setShowDeleteScope(false);
+                (async () => {
+                  await handleDeleteScopeConfirm(scope);
+                })();
+              }} />
             </>
           )}
         </div>

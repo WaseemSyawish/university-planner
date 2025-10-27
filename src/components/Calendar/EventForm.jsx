@@ -45,6 +45,22 @@ export default function EventForm({ values = {}, onChange = () => {}, courseOpti
             {courseOptions.map(c => (<option key={c.id} value={c.id}>{c.code ? `${c.code} — ${c.name}` : c.name}</option>))}
           </select>
         </div>
+        <div className="pt-3 grid grid-cols-2 gap-3">
+          <div>
+            <label htmlFor="ev-type" className="text-xs text-gray-500">Type</label>
+            <select id="ev-type" value={values.type || 'class'} onChange={e => update({ type: e.target.value })} className="mt-2 w-full px-3 py-2 border border-gray-100 rounded-md text-sm">
+              <option value="class">Class / Lecture</option>
+              <option value="tutorial">Tutorial</option>
+              <option value="lab">Lab</option>
+              <option value="assignment">Assignment</option>
+              <option value="exam">Exam</option>
+            </select>
+          </div>
+          <div>
+            <label htmlFor="ev-color" className="text-xs text-gray-500">Color</label>
+            <input id="ev-color" type="color" value={values.color || '#60A5FA'} onChange={e => update({ color: e.target.value })} className="mt-2 w-full px-2 py-2 border border-gray-100 rounded-md text-sm" aria-label="Event color" />
+          </div>
+        </div>
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4 items-start">

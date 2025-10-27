@@ -145,14 +145,31 @@ const UniversityPlanner = () => {
       });
     };
 
+    const handleDelete = async () => {
+      if (!eventData || !eventData.id) return;
+      try {
+        const ok = window.confirm('Delete this event? This cannot be undone.');
+        if (!ok) return;
+        setEvents(prev => prev.filter(e => String(e.id) !== String(eventData.id)));
+        setShowEventModal(false);
+      } catch (e) {
+        console.warn('Delete failed', e);
+      }
+    };
+
     return (
       <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 backdrop-blur-sm">
         <div className="cozy rounded-2xl p-6 w-96 max-w-md transform transition-all duration-300 scale-100 animate-pulse">
           <div className="flex justify-between items-center mb-4">
-            <h3 className="text-lg font-semibold">Add New Event</h3>
-            <button onClick={() => setShowEventModal(false)} className="hover:rotate-90 transition-transform duration-200">
-              <X className="w-5 h-5 text-gray-500" />
-            </button>
+            <h3 className="text-lg font-semibold">{eventData?.id ? 'Edit Event' : 'Add New Event'}</h3>
+            <div className="flex items-center gap-2">
+              {eventData?.id && (
+                <button onClick={handleDelete} className="px-3 py-1 text-sm text-red-600 hover:bg-red-50 rounded-md">Delete</button>
+              )}
+              <button onClick={() => setShowEventModal(false)} className="hover:rotate-90 transition-transform duration-200">
+                <X className="w-5 h-5 text-gray-500" />
+              </button>
+            </div>
           </div>
           
           <div className="space-y-4">

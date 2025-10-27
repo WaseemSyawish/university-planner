@@ -1,4 +1,5 @@
 import React, { useEffect, useState, useRef } from 'react';
+import EditScopeModal from '../src/components/Timetable/EditScopeModal';
 import { createPortal } from 'react-dom';
 import { Plus, Calendar, BookOpen, Trash2, Clock, Flag, Users } from 'lucide-react';
 import { formatDateShort, formatTimeFromParts, buildLocalDateFromParts } from '../src/lib/dateHelpers';
@@ -191,6 +192,8 @@ export default function UniversityPlanner({ initialEvents = [], initialCourses =
     return () => { mounted = false; };
   }, []);
   const [events, setEvents] = useState(initialEvents || []);
+  const [showScopeModal, setShowScopeModal] = useState(false);
+  const [scopeModalContext, setScopeModalContext] = useState(null);
   const [courses, setCourses] = useState(initialCourses || []);
   const [weekTimetable, setWeekTimetable] = useState(ssrTimetable || []);
   const [ssrAttendance, setSsrAttendance] = useState(ssrAttendanceSummary || null);
@@ -323,6 +326,41 @@ export default function UniversityPlanner({ initialEvents = [], initialCourses =
   async function editEventOptimistic(id, updateData) {
     const snapshot = events; setEvents(prev => prev.map(e => e.id === id ? { ...e, ...updateData, pending: true } : e));
     try {
+      // Check if this event is part of a series; if so, show modal to choose single/all
+      const ev = events.find(e => e.id === id) || {};
+      const tplId = ev.template_id || (ev.raw && (ev.raw.template_id || ev.raw.templateId)) || null;
+      const isSeries = !!(ev && (ev.repeatOption || tplId));
+      if (isSeries) {
+        // store pending change and open the modal
+        window.__pendingEdit = { id, updateData };
+        setScopeModalContext({ id, tplId, updateData, kind: 'edit' });
+        setShowScopeModal(true);
+        // wait for user's choice via modal (modal will call handleScopeConfirm below)
+        return new Promise((resolve) => {
+          // the confirm handler will call resolve when done; stash it
+          window.__pendingResolve = resolve;
+        });
+        if (scope === 'single' || !tplId) {
+          const res = await fetch(`/api/events/${id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(updateData) });
+          let j = null; try { j = await res.json(); } catch (e) {}
+          console.info('[editEventOptimistic] PATCH response', { status: res.status, ok: res.ok, body: j });
+          if (res.ok && j && j.success && j.event) { setEvents(prev => prev.map(e => e.id === id ? j.event : e)); addToast({ type: 'success', text: 'Event updated' }); return { success: true }; }
+          else { setEvents(snapshot); const msg = (j && (j.message || j.error || j.details)) ? (j.message || j.error || j.details) : (res.statusText || 'Failed to update event'); addToast({ type: 'error', text: `Failed to update event: ${msg}` }); return { success: false }; }
+        }
+
+        // 'all' scope: apply to all materialized events with same template id
+        try {
+          const list = await fetch('/api/events').then(r => r.ok ? r.json().catch(() => null) : null);
+          const eventsList = Array.isArray(list?.events) ? list.events : (Array.isArray(list) ? list : []);
+          const toPatch = eventsList.filter(ei => (ei && (ei.template_id || (ei.raw && (ei.raw.template_id || ei.raw.templateId))) && String((ei.template_id || (ei.raw && (ei.raw.template_id || ei.raw.templateId))) ) === String(tplId)));
+          for (const p of toPatch) {
+            try { await fetch(`/api/events/${encodeURIComponent(p.id)}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(updateData) }); } catch (e) { console.warn('Bulk update failed for event', p && p.id, e); }
+          }
+          addToast({ type: 'success', text: 'Events updated' });
+          return { success: true };
+        } catch (err) { console.warn('Bulk update failed', err); }
+      }
+
       const res = await fetch(`/api/events/${id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(updateData) });
       let j = null; try { j = await res.json(); } catch (e) { }
       console.info('[editEventOptimistic] PATCH response', { status: res.status, ok: res.ok, body: j });
@@ -344,6 +382,17 @@ export default function UniversityPlanner({ initialEvents = [], initialCourses =
     if (String(id).startsWith('temp-')) { setEvents(prev => prev.filter(e => e.id !== id)); addToast({ type: 'success', text: 'Local event removed' }); return; }
     const snapshot = events; setEvents(prev => prev.filter(e => e.id !== id));
     try {
+      // If event is part of a series prompt for delete scope
+      const ev = events.find(e => e.id === id) || {};
+      const tplId = ev.template_id || (ev.raw && (ev.raw.template_id || ev.raw.templateId)) || null;
+      const isSeries = !!(ev && (ev.repeatOption || tplId));
+      if (isSeries) {
+        // use modal-based flow: set pending and open modal (handled by handleScopeConfirm)
+        window.__pendingDelete = { id };
+        setScopeModalContext({ id, tplId, ev, kind: 'delete', snapshot });
+        setShowScopeModal(true);
+        return;
+      }
       const res = await fetch(`/api/events/${id}`, { method: 'DELETE' });
       let j = null; try { j = await res.json(); } catch (e) { }
       const ok = (j && j.success) || res.ok;
@@ -352,9 +401,77 @@ export default function UniversityPlanner({ initialEvents = [], initialCourses =
     } catch (err) { console.error(err); setEvents(snapshot); setToasts(t => [...t, { id: Date.now(), type: 'error', text: 'Failed to delete event' }]); }
   }
 
+  // Modal confirm handler used by inline modal in this component
+  async function handleScopeConfirm(selectedScope) {
+    setShowScopeModal(false);
+    const ctx = scopeModalContext || window.__pendingEdit || window.__pendingDelete || {};
+    const id = ctx.id || (ctx && ctx.updateData && ctx.updateData.id) || (window.__pendingEdit && window.__pendingEdit.id) || (window.__pendingDelete && window.__pendingDelete.id);
+    const updateData = (ctx.updateData) || (window.__pendingEdit && window.__pendingEdit.updateData) || {};
+    const tplId = (scopeModalContext && scopeModalContext.tplId) || null;
+    const kind = (scopeModalContext && scopeModalContext.kind) || (ctx && ctx.kind) || 'edit';
+    const snapshot = (scopeModalContext && scopeModalContext.snapshot) || null;
+    try {
+      if (!id) { if (window.__pendingResolve) window.__pendingResolve({ success: false }); return; }
+
+      if (kind === 'delete') {
+        // delete flow
+        if (selectedScope === 'single' || !tplId) {
+          const res = await fetch(`/api/events/${id}`, { method: 'DELETE' });
+          const j = await res.json().catch(() => null);
+          const ok = (j && j.success) || res.ok;
+          if (!ok) { setEvents(prev => [...snapshot || prev]); addToast({ type: 'error', text: 'Failed to delete event' }); if (window.__pendingResolve) window.__pendingResolve({ success: false }); return; }
+          else { addToast({ type: 'success', text: 'Event deleted', undoSnapshot: snapshot, ttl: 8000 }); if (window.__pendingResolve) window.__pendingResolve({ success: true }); return; }
+        }
+
+        // all: delete all matching template events
+        try {
+          const list = await fetch('/api/events').then(r => r.ok ? r.json().catch(() => null) : null);
+          const eventsList = Array.isArray(list?.events) ? list.events : (Array.isArray(list) ? list : []);
+          const toDelete = eventsList.filter(ei => (ei && (ei.template_id || (ei.raw && (ei.raw.template_id || ei.raw.templateId))) && String((ei.template_id || (ei.raw && (ei.raw.template_id || ei.raw.templateId))) ) === String(tplId)));
+          for (const p of toDelete) {
+            try { await fetch(`/api/events/${encodeURIComponent(p.id)}`, { method: 'DELETE' }); } catch (e) { console.warn('Bulk delete failed for event', p && p.id, e); }
+          }
+          addToast({ type: 'success', text: 'Events deleted', undoSnapshot: snapshot, ttl: 8000 }); if (window.__pendingResolve) window.__pendingResolve({ success: true }); return;
+        } catch (err) { console.warn('Bulk delete failed', err); if (window.__pendingResolve) window.__pendingResolve({ success: false }); }
+      }
+
+      // edit flow (default)
+      if (selectedScope === 'single' || !tplId) {
+        const res = await fetch(`/api/events/${id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(updateData) });
+        const j = await res.json().catch(() => null);
+        if (res.ok && j && j.success && j.event) { setEvents(prev => prev.map(e => e.id === id ? j.event : e)); addToast({ type: 'success', text: 'Event updated' }); if (window.__pendingResolve) window.__pendingResolve({ success: true }); return; }
+        else { addToast({ type: 'error', text: 'Failed to update event' }); if (window.__pendingResolve) window.__pendingResolve({ success: false }); return; }
+      }
+
+      // all: bulk update client-side
+      try {
+        const list = await fetch('/api/events').then(r => r.ok ? r.json().catch(() => null) : null);
+        const eventsList = Array.isArray(list?.events) ? list.events : (Array.isArray(list) ? list : []);
+        const toPatch = eventsList.filter(ei => (ei && (ei.template_id || (ei.raw && (ei.raw.template_id || ei.raw.templateId))) && String((ei.template_id || (ei.raw && (ei.raw.template_id || ei.raw.templateId))) ) === String(tplId)));
+        for (const p of toPatch) {
+          try { await fetch(`/api/events/${encodeURIComponent(p.id)}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(updateData) }); } catch (e) { console.warn('Bulk update failed for event', p && p.id, e); }
+        }
+        addToast({ type: 'success', text: 'Events updated' }); if (window.__pendingResolve) window.__pendingResolve({ success: true }); return;
+      } catch (err) { console.warn('Bulk update failed', err); if (window.__pendingResolve) window.__pendingResolve({ success: false }); }
+    } finally {
+      // cleanup
+      window.__pendingEdit = null; window.__pendingDelete = null; window.__pendingResolve = null; setScopeModalContext(null);
+    }
+  }
+
   return (
     <div>
       {/* header, main, modals and rest of the app (kept same as original) */}
+      <EditScopeModal
+        visible={!!showScopeModal}
+        mode={(scopeModalContext && scopeModalContext.kind) === 'delete' ? 'delete' : 'edit'}
+        onClose={() => {
+          setShowScopeModal(false);
+          if (window.__pendingResolve) { window.__pendingResolve({ success: false }); }
+          window.__pendingEdit = null; window.__pendingDelete = null; window.__pendingResolve = null; setScopeModalContext(null);
+        }}
+        onConfirm={(scope) => handleScopeConfirm(scope)}
+      />
     </div>
   );
 }
