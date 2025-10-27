@@ -273,76 +273,49 @@ export default function UniversityOverview() {
             setTodayClasses(finalToday);
             setWeekClassesCount(weekCount || 0);
 
-            // If nothing today, compute a short list of next upcoming classes from events
-            if (!finalToday.length) {
-        try {
-          const evs = await safeFetchJson('/api/events');
-                if (evs && Array.isArray(evs.events)) {
-                  // helper: convert to local date-only (midnight) for fair comparisons
-                  const toLocalMidnight = (d) => {
-                    try {
-                      const dt = new Date(d);
-                      if (isNaN(dt.getTime())) return null;
-                      return new Date(dt.getFullYear(), dt.getMonth(), dt.getDate());
-                    } catch (e) { return null; }
-                  };
+            // Compute a short list of next upcoming classes from events (always show next N instances)
+            try {
+              // helper: convert to local date-only (midnight) for fair comparisons
+              const toLocalMidnight = (d) => {
+                try {
+                  const dt = new Date(d);
+                  if (isNaN(dt.getTime())) return null;
+                  return new Date(dt.getFullYear(), dt.getMonth(), dt.getDate());
+                } catch (e) { return null; }
+              };
 
-                  const todayMid = toLocalMidnight(new Date());
+              const todayMid = toLocalMidnight(new Date());
+              const upcomingLimit = 3; // show the next 2-4 instances; default to 3
 
-                  // Build upcoming list but prefer to promote any lectures happening today
-                  const allUpcoming = evs.events
-                    .filter(e => e && (e.type === 'lecture' || e.type === 'class') && e.date)
-                    .map(e => ({
-                      id: e.id,
-                      date: e.date,
-                      time: e.time,
-                      name: e.title || e.name || e.subject || 'Class',
-                      code: e.course || (e.title||'').split(' ')[0] || 'TBA',
-                      location: e.location || '',
-                      instructor: e.instructor || ''
-                    }))
-                    .map(e => ({ ...e, _dateObj: toLocalMidnight(e.date) }))
-                    .filter(e => e._dateObj && e._dateObj >= todayMid) // only today or future
-                    .sort((a,b) => a._dateObj - b._dateObj)
-                    .slice(0,12) // fetch more so we can split into todays + rest
-                    .map(({_dateObj, ...rest}) => ({ ...rest, _dateObj }));
+              const evs = await safeFetchJson('/api/events');
+              if (evs && Array.isArray(evs.events)) {
+                const allUpcoming = evs.events
+                  .filter(e => e && (e.type === 'lecture' || e.type === 'class') && e.date)
+                  .map(e => ({
+                    id: e.id,
+                    date: e.date,
+                    time: e.time,
+                    name: e.title || e.name || e.subject || 'Class',
+                    code: e.course || (e.title||'').split(' ')[0] || 'TBA',
+                    location: e.location || '',
+                    instructor: e.instructor || ''
+                  }))
+                  .map(e => ({ ...e, _dateObj: toLocalMidnight(e.date) }))
+                  // only future (strictly after today)
+                  .filter(e => e._dateObj && e._dateObj.getTime() > todayMid.getTime())
+                  .sort((a,b) => a._dateObj - b._dateObj)
+                  .slice(0, 12)
+                  .map(({_dateObj, ...rest}) => ({ ...rest, _dateObj }));
 
-                  // Split out items that are for today
-                  const todaysFromUpcoming = allUpcoming.filter(i => {
-                    try {
-                      if (!i._dateObj) return false;
-                      const y = i._dateObj.getFullYear();
-                      const m = i._dateObj.getMonth();
-                      const d = i._dateObj.getDate();
-                      const mid = new Date(y, m, d);
-                      return mid.getTime() === todayMid.getTime();
-                    } catch (e) { return false; }
-                  }).map(({_dateObj, ...rest}) => rest).slice(0,6);
+                const upcomingRest = allUpcoming
+                  .map(({_dateObj, ...rest}) => rest)
+                  .slice(0, upcomingLimit);
 
-                  const upcomingRest = allUpcoming.filter(i => {
-                    try {
-                      if (!i._dateObj) return true;
-                      const y = i._dateObj.getFullYear();
-                      const m = i._dateObj.getMonth();
-                      const d = i._dateObj.getDate();
-                      const mid = new Date(y, m, d);
-                      return mid.getTime() !== todayMid.getTime();
-                    } catch (e) { return true; }
-                  }).map(({_dateObj, ...rest}) => rest).slice(0,6);
-
-                  // If we found any lectures for today in upcoming, promote them to Today's Classes
-                  if (todaysFromUpcoming.length) {
-                    // set todayList and nextClasses accordingly
-                    setTodayClasses(todaysFromUpcoming);
-                    setNextClasses(upcomingRest);
-                  } else {
-                    setNextClasses(upcomingRest);
-                  }
-                }
-              } catch (e) { setNextClasses([]); }
-            } else {
-              setNextClasses([]);
-            }
+                setNextClasses(upcomingRest);
+              } else {
+                setNextClasses([]);
+              }
+            } catch (e) { setNextClasses([]); }
           }
         } finally { setIsLoadingClasses(false); }
 
