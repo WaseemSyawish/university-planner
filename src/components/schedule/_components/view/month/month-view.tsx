@@ -116,8 +116,12 @@ export default function MonthView({
   }
 
   function handleShowMoreEvents(dayEvents: Event[]) {
+    const title = dayEvents && dayEvents[0]
+      ? new Date(dayEvents[0].startDate).toDateString()
+      : "";
+
     setOpen(
-      <CustomModal title={dayEvents && dayEvents[0]?.startDate.toDateString()}>
+      <CustomModal title={title}>
         <ShowMoreEventsModal />
       </CustomModal>,
       async () => {
