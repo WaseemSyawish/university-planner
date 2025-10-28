@@ -4,6 +4,9 @@ import Head from 'next/head';
 import { Calendar, Plus, ChevronLeft, ChevronRight, Trash2, Edit3, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import AddEventModal from '@/components/schedule/_modals/add-event-modal';
+import CustomModal from '@/components/ui/custom-modal';
+import { useModal } from '@/providers/modal-context';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 // Using native select in this page for a simpler behavior; keep other UI helpers imported separately
@@ -73,7 +76,9 @@ export default function CalendarPage() {
   const [pendingDeleteId, setPendingDeleteId] = useState(null);
   const [newEvent, setNewEvent] = useState({ title: '', date: toYMD(new Date()), startTime: '', endTime: '', type: 'event', location: '', description: '', color: 'bg-blue-500' });
   const gridRef = useRef(null);
+  const createBtnRef = useRef(null);
   const [showDebug, setShowDebug] = useState(false);
+  const { setOpen, setClose } = useModal();
 
   // Toast notifications local to Calendar page
   const [toast, setToast] = useState(null);
@@ -150,7 +155,23 @@ export default function CalendarPage() {
     setSelectedEvent(null);
     setNewEvent(prev => ({ ...prev, title: '', date: ymd, startTime: '', endTime: '', type: 'event', location: '', description: '' }));
     setSelectedDate(ymd);
-    setShowEventModal(true);
+    // Open the standardized AddEventModal via the global modal provider
+    try {
+      // compute anchor rect from the Create button so the modal can animate/originate from that point
+      const rect = createBtnRef.current && typeof createBtnRef.current.getBoundingClientRect === 'function'
+        ? createBtnRef.current.getBoundingClientRect()
+        : null;
+      setOpen(
+        <CustomModal title="Add Event">
+          <AddEventModal />
+        </CustomModal>,
+        async () => ({ default: { title: '', startDate: ymd, endDate: ymd, time: '', type: 'event', location: '', description: '' }, anchor: rect }),
+        'default'
+      );
+    } catch (e) {
+      // fallback to legacy local dialog
+      setShowEventModal(true);
+    }
   };
 
   // Handler when user confirms scope in EditScopeModal
@@ -521,7 +542,17 @@ export default function CalendarPage() {
     e.stopPropagation();
     setSelectedEvent(ev);
     setNewEvent({ title: ev.title, date: toYMD(ev.date), startTime: ev.startTime || '', endTime: ev.endTime || '', type: ev.type || 'event', location: ev.location || '', description: ev.description || '', color: ev.color || 'bg-blue-500' });
-    setShowEventModal(true);
+    try {
+      setOpen(
+        <CustomModal title="Edit Event">
+          <AddEventModal />
+        </CustomModal>,
+        async () => ({ default: ev }),
+        'default'
+      );
+    } catch (err) {
+      setShowEventModal(true);
+    }
   };
 
   const resetForm = () => setNewEvent({ title: '', date: selectedDate || toYMD(new Date()), startTime: '', endTime: '', type: 'event', location: '', description: '', color: 'bg-blue-500' });
@@ -814,7 +845,7 @@ export default function CalendarPage() {
             <EditScopeModal visible={showEditScopeModal} mode={'edit'} onClose={() => { setShowEditScopeModal(false); setPendingSavePayload(null); setPendingEventId(null); }} onConfirm={(scope) => handleScopeConfirm(scope)} />
             <EditScopeModal visible={showDeleteScopeModal} mode={'delete'} onClose={() => { setShowDeleteScopeModal(false); setPendingDeleteId(null); }} onConfirm={(scope) => handleDeleteScopeConfirm(scope)} />
           </div>
-          <button onClick={handleTodayCreate} className="px-5 py-2 bg-gradient-to-r from-purple-600 to-purple-700 hover:from-purple-500 hover:to-purple-600 text-white rounded-lg text-sm font-medium transition-all duration-200 hover:shadow-lg hover:shadow-purple-500/30 flex items-center gap-2">
+          <button ref={createBtnRef} onClick={handleTodayCreate} className="px-5 py-2 bg-gradient-to-r from-purple-600 to-purple-700 hover:from-purple-500 hover:to-purple-600 text-white rounded-lg text-sm font-medium transition-all duration-200 hover:shadow-lg hover:shadow-purple-500/30 flex items-center gap-2">
             <Plus className="w-4 h-4" />
             <span className="ml-2">Create</span>
           </button>
@@ -1165,177 +1196,7 @@ export default function CalendarPage() {
         </div>
       </main>
 
-      <Dialog open={showEventModal} onOpenChange={(open) => { setShowEventModal(open); if (!open) { setSelectedEvent(null); resetForm(); } }}>
-        <DialogContent data-state={showEventModal ? 'open' : 'closed'} className="max-w-2xl max-h-[85vh] rounded-2xl border border-slate-200/80 shadow-2xl cozy dialog-cozy flex flex-col overflow-hidden bg-white">
-          <DialogHeader className="border-b border-slate-100 bg-gradient-to-r from-purple-50/50 via-white to-blue-50/50">
-            <div className="flex items-center justify-between px-6 py-5">
-              <div className="flex items-center gap-4">
-                <div className="w-12 h-12 bg-gradient-to-br from-purple-600 to-purple-700 rounded-xl flex items-center justify-center shadow-lg shadow-purple-500/20">
-                  {selectedEvent ? <Edit3 className="w-5 h-5 text-white" /> : <Plus className="w-5 h-5 text-white" />}
-                </div>
-                <div>
-                  <DialogTitle className="text-2xl font-bold text-slate-900">
-                    {selectedEvent ? 'Edit Event' : 'Create Event'}
-                  </DialogTitle>
-                  <p className="text-sm text-slate-500 mt-0.5">
-                    {selectedEvent ? 'Update event details' : 'Add a new event to your calendar'}
-                  </p>
-                </div>
-              </div>
-              <button
-                onClick={() => { setShowEventModal(false); setSelectedEvent(null); resetForm(); }}
-                className="p-2 rounded-lg hover:bg-slate-100 transition-colors"
-                aria-label="Close dialog"
-              >
-                <X className="w-5 h-5 text-slate-400" />
-              </button>
-            </div>
-          </DialogHeader>
-
-          <div className="px-6 py-6 overflow-y-auto hide-scrollbar flex-1 space-y-6">
-            <div className="space-y-2">
-              <Label htmlFor="title" className="text-sm font-semibold text-slate-700 flex items-center gap-1.5">
-                Event Title <span className="text-red-500">*</span>
-              </Label>
-              <Input
-                id="title"
-                type="text"
-                value={newEvent.title}
-                onChange={(e) => setNewEvent({ ...newEvent, title: e.target.value })}
-                placeholder="e.g., Team Meeting, Project Deadline"
-                className="h-12 text-base rounded-lg border-2 border-slate-200 focus:border-purple-500 focus:ring-2 focus:ring-purple-200 transition-all"
-                required
-              />
-            </div>
-
-            <div className="grid grid-cols-2 gap-4">
-              <div className="space-y-2">
-                <Label htmlFor="date" className="text-sm font-semibold text-slate-700 flex items-center gap-1.5">
-                  Date <span className="text-red-500">*</span>
-                </Label>
-                <Input
-                  id="date"
-                  type="date"
-                  value={newEvent.date}
-                  onChange={(e) => setNewEvent({ ...newEvent, date: e.target.value })}
-                  className="h-12 rounded-lg border-2 border-slate-200 focus:border-purple-500 focus:ring-2 focus:ring-purple-200 transition-all"
-                  required
-                />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="type" className="text-sm font-semibold text-slate-700">Type</Label>
-                <select
-                  id="type"
-                  value={newEvent.type}
-                  onChange={(e) => setNewEvent({ ...newEvent, type: e.target.value })}
-                  className="h-12 rounded-lg border-2 border-slate-200 focus:border-purple-500 focus:ring-2 focus:ring-purple-200 transition-all px-3 w-full bg-white text-slate-900"
-                >
-                  <option value="event">Event</option>
-                  <option value="class">Class</option>
-                  <option value="deadline">Deadline</option>
-                  <option value="assignment">Assignment</option>
-                </select>
-              </div>
-            </div>
-
-            <div className="grid grid-cols-2 gap-4">
-              <div className="space-y-2">
-                <Label htmlFor="startTime" className="text-sm font-semibold text-slate-700">Start Time</Label>
-                <Input
-                  id="startTime"
-                  type="time"
-                  value={newEvent.startTime}
-                  onChange={(e) => setNewEvent({ ...newEvent, startTime: e.target.value })}
-                  className="h-12 rounded-lg border-2 border-slate-200 focus:border-purple-500 focus:ring-2 focus:ring-purple-200 transition-all"
-                />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="endTime" className="text-sm font-semibold text-slate-700">End Time</Label>
-                <Input
-                  id="endTime"
-                  type="time"
-                  value={newEvent.endTime}
-                  onChange={(e) => setNewEvent({ ...newEvent, endTime: e.target.value })}
-                  className="h-12 rounded-lg border-2 border-slate-200 focus:border-purple-500 focus:ring-2 focus:ring-purple-200 transition-all"
-                />
-              </div>
-            </div>
-
-            <div className="space-y-2">
-              <Label htmlFor="location" className="text-sm font-semibold text-slate-700">Location</Label>
-              <Input
-                id="location"
-                type="text"
-                value={newEvent.location}
-                onChange={(e) => setNewEvent({ ...newEvent, location: e.target.value })}
-                placeholder="e.g., Room 301, Online, Conference Hall"
-                className="h-12 text-base rounded-lg border-2 border-slate-200 focus:border-purple-500 focus:ring-2 focus:ring-purple-200 transition-all"
-              />
-            </div>
-
-            <div className="space-y-2">
-              <Label className="text-sm font-semibold text-slate-700">Color</Label>
-              <div className="flex gap-2.5 flex-wrap">
-                {['bg-primary', 'bg-secondary', 'bg-accent', 'bg-info', 'bg-success', 'bg-warning', 'bg-error', 'bg-neutral'].map(color => (
-                  <button
-                    key={color}
-                    type="button"
-                    onClick={() => {
-                      try { localStorage.setItem('up:lastEventColor', color); } catch (e) { }
-                      setNewEvent({ ...newEvent, color });
-                    }}
-                    className={`w-11 h-11 ${color} rounded-lg transition-all duration-200 ${newEvent.color === color
-                        ? 'ring-3 ring-offset-2 ring-slate-400 shadow-lg scale-105'
-                        : 'hover:scale-105 hover:shadow-md'
-                      }`}
-                    aria-label={`Select ${color} color`}
-                  />
-                ))}
-              </div>
-            </div>
-
-            <div className="space-y-2">
-              <Label htmlFor="description" className="text-sm font-semibold text-slate-700">Description</Label>
-              <Textarea
-                id="description"
-                value={newEvent.description}
-                onChange={(e) => setNewEvent({ ...newEvent, description: e.target.value })}
-                rows={4}
-                placeholder="Add any additional details about this event..."
-                className="text-base rounded-lg border-2 border-slate-200 focus:border-purple-500 focus:ring-2 focus:ring-purple-200 transition-all resize-none"
-              />
-            </div>
-          </div>
-
-          <div className="border-t border-slate-100 px-6 py-4 bg-slate-50/50">
-            <div className="flex gap-3">
-              <Button
-                onClick={() => { setShowEventModal(false); setSelectedEvent(null); resetForm(); }}
-                variant="outline"
-                className="flex-1 h-11 border-slate-300 hover:bg-slate-100 rounded-lg font-medium text-slate-700"
-              >
-                Cancel
-              </Button>
-              {selectedEvent && (
-                <Button
-                  onClick={() => { handleDeleteEvent(selectedEvent); }}
-                  variant="outline"
-                  className="h-11 px-5 border-red-300 hover:bg-red-50 text-red-600 hover:text-red-700 rounded-lg font-medium"
-                >
-                  Delete
-                </Button>
-              )}
-              <Button
-                onClick={selectedEvent ? handleUpdateEvent : handleCreateEvent}
-                disabled={!newEvent.title || !newEvent.date}
-                className="flex-1 h-11 bg-gradient-to-r from-purple-600 to-purple-700 hover:from-purple-700 hover:to-purple-800 text-white shadow-md hover:shadow-lg disabled:opacity-50 disabled:cursor-not-allowed rounded-lg font-medium transition-all"
-              >
-                {selectedEvent ? 'Update Event' : 'Create Event'}
-              </Button>
-            </div>
-          </div>
-        </DialogContent>
-      </Dialog>
+      {/* Event modal moved to shared AddEventModal via ModalProvider */}
 
       {process.env.NODE_ENV === 'development' && showDebug && (
         <DebugOverlay gridRef={gridRef} />

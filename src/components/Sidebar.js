@@ -18,6 +18,7 @@ import { User } from 'lucide-react';
 import Avatar from '../components/Avatar';
 import { Settings, LogOut } from 'lucide-react';
 import { signOut } from 'next-auth/react';
+import Portal from './Portal';
 
 const Sidebar = ({ isCollapsed, setIsCollapsed }) => {
   const router = useRouter();
@@ -164,21 +165,54 @@ export default Sidebar;
 function ProfilePanel({ profile, loading }) {
   const p = profile || { name: 'Demo User', email: 'demo@university.edu', avatarColor: '#7c3aed' };
   const [showMenu, setShowMenu] = React.useState(false);
-  const menuRef = React.useRef(null);
+  const containerRef = React.useRef(null);
+  const btnRef = React.useRef(null);
+  const popRef = React.useRef(null);
+  const [coords, setCoords] = React.useState(null);
 
   React.useEffect(() => {
     function handleClickOutside(e) {
-      if (menuRef.current && !menuRef.current.contains(e.target)) {
-        setShowMenu(false);
-      }
+      if (containerRef.current && containerRef.current.contains(e.target)) return;
+      if (popRef.current && popRef.current.contains(e.target)) return;
+      setShowMenu(false);
     }
     document.addEventListener('mousedown', handleClickOutside);
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
 
+  React.useLayoutEffect(() => {
+    if (!showMenu) return;
+    const b = btnRef.current && btnRef.current.getBoundingClientRect();
+    if (b) setCoords(b);
+  }, [showMenu]);
+  const [posStyle, setPosStyle] = React.useState({});
+  React.useLayoutEffect(() => {
+    if (!coords) return;
+    const margin = 8;
+    const estWidth = 320; // used to avoid overflowing viewport
+    const vpW = typeof window !== 'undefined' ? window.innerWidth : 1200;
+    const vpH = typeof window !== 'undefined' ? window.innerHeight : 800;
+    // Preferred left: to the right of the sidebar button
+    let left = Math.round(coords.right + margin);
+    // If placing to right would overflow, try placing to left of the trigger
+    if (left + estWidth > vpW) {
+      left = Math.max(8, Math.round(coords.left - estWidth - margin));
+    }
+    const belowSpace = vpH - coords.bottom;
+    const aboveSpace = coords.top;
+    // If there's enough space below, position below; otherwise position above using bottom
+    if (belowSpace >= 220) {
+      setPosStyle({ position: 'fixed', left, top: Math.round(coords.bottom + margin), zIndex: 2000 });
+    } else {
+      const bottom = Math.round(vpH - coords.top + margin);
+      setPosStyle({ position: 'fixed', left, bottom, zIndex: 2000 });
+    }
+  }, [coords]);
+
   return (
-    <div className="relative" ref={menuRef}>
+    <div className="relative" ref={containerRef}>
       <button
+        ref={btnRef}
         onClick={() => setShowMenu(!showMenu)}
         className="w-full flex items-center gap-3 p-3 rounded-lg hover:bg-gray-50 dark:hover:bg-white/5 transition-all group"
       >
@@ -192,46 +226,51 @@ function ProfilePanel({ profile, loading }) {
         <Settings className="w-4 h-4 text-gray-400 opacity-0 group-hover:opacity-100 transition-opacity" />
       </button>
 
-      {/* Dropdown Menu */}
-      {showMenu && (
-        <div className="absolute bottom-full left-0 right-0 mb-2 bg-white dark:bg-gray-800 rounded-lg shadow-lg border border-gray-200 dark:border-gray-700 overflow-hidden">
-          <div className="p-3 border-b border-gray-200 dark:border-gray-700">
-            <p className="text-sm font-semibold text-gray-900 dark:text-white truncate">{p.name}</p>
-            <p className="text-xs text-gray-500 dark:text-gray-400 truncate">{p.email}</p>
+      {showMenu && coords && (
+        <Portal>
+          <div
+            ref={popRef}
+            style={{ ...posStyle, minWidth: 220 }}
+            className="bg-white dark:bg-gray-800 rounded-lg shadow-lg border border-gray-200 dark:border-gray-700 overflow-hidden"
+          >
+            <div className="p-3 border-b border-gray-200 dark:border-gray-700">
+              <p className="text-sm font-semibold text-gray-900 dark:text-white truncate">{p.name}</p>
+              <p className="text-xs text-gray-500 dark:text-gray-400 truncate">{p.email}</p>
+            </div>
+            <div className="py-1">
+              <a
+                role="menuitem"
+                href="/profile"
+                className="flex items-center gap-3 px-4 py-2.5 text-sm text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors"
+              >
+                <User className="w-4 h-4" />
+                Profile
+              </a>
+              <a
+                role="menuitem"
+                href="/settings"
+                className="flex items-center gap-3 px-4 py-2.5 text-sm text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors"
+              >
+                <Settings className="w-4 h-4" />
+                Settings
+              </a>
+            </div>
+            <div className="border-t border-gray-200 dark:border-gray-700 py-1">
+              <button
+                onClick={async () => {
+                  try {
+                    try { await fetch('/api/auth/local-signout', { method: 'POST' }); } catch (e) { }
+                    await signOut({ callbackUrl: '/landing' });
+                  } catch (e) { window.location.href = '/signout'; }
+                }}
+                className="flex items-center gap-3 w-full px-4 py-2.5 text-sm text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors"
+              >
+                <LogOut className="w-4 h-4" />
+                Sign out
+              </button>
+            </div>
           </div>
-          <div className="py-1">
-            <a
-              role="menuitem"
-              href="/profile"
-              className="flex items-center gap-3 px-4 py-2.5 text-sm text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors"
-            >
-              <User className="w-4 h-4" />
-              Profile
-            </a>
-            <a
-              role="menuitem"
-              href="/settings"
-              className="flex items-center gap-3 px-4 py-2.5 text-sm text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors"
-            >
-              <Settings className="w-4 h-4" />
-              Settings
-            </a>
-          </div>
-          <div className="border-t border-gray-200 dark:border-gray-700 py-1">
-            <button
-              onClick={async () => {
-                try {
-                  try { await fetch('/api/auth/local-signout', { method: 'POST' }); } catch (e) { }
-                  await signOut({ callbackUrl: '/landing' });
-                } catch (e) { window.location.href = '/signout'; }
-              }}
-              className="flex items-center gap-3 w-full px-4 py-2.5 text-sm text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors"
-            >
-              <LogOut className="w-4 h-4" />
-              Sign out
-            </button>
-          </div>
-        </div>
+        </Portal>
       )}
     </div>
   );
@@ -254,6 +293,30 @@ function CollapsedProfileButton({ profile }) {
     return () => document.removeEventListener('click', onDoc);
   }, [open]);
 
+  const [coords, setCoords] = React.useState(null);
+  React.useLayoutEffect(() => {
+    if (!open) return;
+    const b = btnRef.current && btnRef.current.getBoundingClientRect();
+    if (b) setCoords(b);
+  }, [open]);
+  const [posStyleCollapsed, setPosStyleCollapsed] = React.useState({});
+  React.useLayoutEffect(() => {
+    if (!coords) return;
+    const margin = 8;
+    const estWidth = 300;
+    const vpW = typeof window !== 'undefined' ? window.innerWidth : 1200;
+    const vpH = typeof window !== 'undefined' ? window.innerHeight : 800;
+    let left = Math.round(coords.right + margin);
+    if (left + estWidth > vpW) left = Math.max(8, Math.round(coords.left - estWidth - margin));
+    const belowSpace = vpH - coords.bottom;
+    if (belowSpace >= 220) {
+      setPosStyleCollapsed({ position: 'fixed', left, top: Math.round(coords.bottom + margin), zIndex: 2000 });
+    } else {
+      const bottom = Math.round(vpH - coords.top + margin);
+      setPosStyleCollapsed({ position: 'fixed', left, bottom, zIndex: 2000 });
+    }
+  }, [coords]);
+
   return (
     <div style={{ position: 'relative' }}>
       <button
@@ -267,14 +330,15 @@ function CollapsedProfileButton({ profile }) {
       >
         <Avatar name={p.name} color={p.avatarColor} size={32} />
       </button>
-      {open && (
-        <div 
-          ref={popRef} 
-          role="menu" 
-          aria-label="User menu" 
-          className="absolute bottom-12 left-0 transform translate-x-full bg-white dark:bg-gray-800 rounded-lg shadow-lg border border-gray-200 dark:border-gray-700 overflow-hidden"
-          style={{ minWidth: 200, zIndex: 50 }}
-        >
+      {open && coords && (
+        <Portal>
+          <div
+            ref={popRef}
+            role="menu"
+            aria-label="User menu"
+            className="bg-white dark:bg-gray-800 rounded-lg shadow-lg border border-gray-200 dark:border-gray-700 overflow-hidden"
+            style={{ ...posStyleCollapsed, minWidth: 200 }}
+          >
           <div className="p-3 border-b border-gray-200 dark:border-gray-700">
             <p className="text-sm font-semibold text-gray-900 dark:text-white truncate">{p.name}</p>
             <p className="text-xs text-gray-500 dark:text-gray-400 truncate">{p.email || 'demo@university.edu'}</p>
@@ -312,8 +376,9 @@ function CollapsedProfileButton({ profile }) {
               Sign out
             </button>
           </div>
-        </div>
-      )}
+          </div>
+          </Portal>
+        )}
     </div>
   );
 }

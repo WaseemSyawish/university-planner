@@ -1,24 +1,30 @@
 import React, { useState, useEffect } from 'react';
 import Head from 'next/head';
-import { Calendar, BookOpen, TrendingUp, Clock, CheckCircle, AlertCircle, GraduationCap, Users } from 'lucide-react';
+import { Calendar, BookOpen, TrendingUp, Clock, CheckCircle, AlertCircle, GraduationCap, Users, Plus } from 'lucide-react';
 import CalendarHeader from '../src/components/CalendarHeader.jsx';
 
 // Small presentational StatCard with light/dark mode support
 function StatCard({ icon, label, value, loading, accent = 'purple', smallIconClass = '' }) {
-  // include dark variants for the small icon container so icons remain visible
   const bg = smallIconClass || {
-    purple: 'bg-purple-50 dark:bg-purple-800',
-    blue: 'bg-blue-50 dark:bg-blue-700',
-    orange: 'bg-orange-50 dark:bg-orange-700',
-    green: 'bg-green-50 dark:bg-green-700'
+    purple: 'bg-purple-50 dark:bg-purple-900/30',
+    blue: 'bg-blue-50 dark:bg-blue-900/30',
+    orange: 'bg-orange-50 dark:bg-orange-900/30',
+    green: 'bg-green-50 dark:bg-green-900/30'
   }[accent] || 'bg-gray-50 dark:bg-gray-700';
+  
   return (
     <div className="rounded-xl p-5 shadow-sm border border-gray-100 bg-white dark:bg-gray-800 dark:border-gray-700">
       <div className="flex items-start justify-between mb-3">
         <div className={`w-12 h-12 ${bg} rounded-lg flex items-center justify-center`}>{icon}</div>
       </div>
-      <p className="text-gray-500 dark:text-gray-300 text-sm mb-1">{label}</p>
-      <p className="text-2xl font-bold text-gray-900 dark:text-gray-100">{loading ? '—' : value}</p>
+      <p className="text-gray-500 dark:text-gray-400 text-sm mb-1">{label}</p>
+      <p className="text-2xl font-bold text-gray-900 dark:text-gray-100">
+        {loading ? (
+          <span className="inline-block w-16 h-7 bg-gray-200 dark:bg-gray-700 rounded animate-pulse"></span>
+        ) : (
+          value
+        )}
+      </p>
     </div>
   );
 }
@@ -29,11 +35,10 @@ function Skeleton({ width = 'w-24', height = 'h-6' }) {
 
 export default function UniversityOverview() {
   const [currentDate, setCurrentDate] = useState(new Date());
-  // start empty so we don't display a hard-coded name; we'll fetch the real name
   const [userName, setUserName] = useState('');
   const [isLoadingUser, setIsLoadingUser] = useState(true);
 
-  // State-backed data (initially empty; will be populated from backend)
+  // State-backed data
   const [todayClasses, setTodayClasses] = useState([]);
   const [upcomingDeadlines, setUpcomingDeadlines] = useState([]);
   const [isLoadingClasses, setIsLoadingClasses] = useState(true);
@@ -41,7 +46,6 @@ export default function UniversityOverview() {
 
   // Auxiliary data caches
   const [courses, setCourses] = useState([]);
-  // Quick stat derived values
   const [quickStats, setQuickStats] = useState({ gpa: null, credits: null, dueThisWeek: null, attendanceRate: null });
   const [isLoadingQuickStats, setIsLoadingQuickStats] = useState(true);
 
@@ -49,17 +53,14 @@ export default function UniversityOverview() {
   const [weekClassesCount, setWeekClassesCount] = useState(0);
   const [assignmentsDueCount, setAssignmentsDueCount] = useState(0);
   const [studyHoursLogged, setStudyHoursLogged] = useState(0);
-  // No debug payloads in production; keep code paths minimal
   const [nextClasses, setNextClasses] = useState([]);
 
-  // Trigger to allow manual refresh of data (declared before effect)
   const [refreshCounter, setRefreshCounter] = useState(0);
 
   function refreshData() {
     setRefreshCounter((c) => c + 1);
   }
 
-  // Helper: attempt to fetch a JSON endpoint and return parsed payload or null on failure
   async function safeFetchJson(url) {
     try {
       const res = await fetch(url);
@@ -78,7 +79,6 @@ export default function UniversityOverview() {
         // Basic data: user and courses
         try {
           setIsLoadingUser(true);
-          // Prefer the authenticated endpoint; fall back to dev smoke_user when running locally
           async function fetchMe() {
             let res = await safeFetchJson('/api/auth/me');
             if (!res && typeof window !== 'undefined') {
@@ -92,7 +92,6 @@ export default function UniversityOverview() {
 
           const me = await fetchMe();
           if (mounted && me) {
-            // Support two shapes: { user: { name, firstName, username } } and { name, id, email }
             const payloadUser = (me.user && typeof me.user === 'object') ? me.user : me;
             const resolvedName = payloadUser?.name || payloadUser?.firstName || payloadUser?.username || '';
             if (resolvedName) setUserName(resolvedName);
@@ -102,16 +101,14 @@ export default function UniversityOverview() {
         const coursesBody = await safeFetchJson('/api/courses');
         if (mounted && coursesBody && Array.isArray(coursesBody.courses)) setCourses(coursesBody.courses);
 
-        // TIMETABLE + FALLBACK: try timetable first, otherwise map events to today's lectures
+        // TIMETABLE + FALLBACK
         setIsLoadingClasses(true);
         try {
-          // Try normally, then retry with a development userId fallback when not authenticated
           async function tryFetchTimetable(path) {
             let res = await safeFetchJson(path);
             if (!res && typeof window !== 'undefined') {
               const host = window.location.hostname;
               if (host === 'localhost' || host === '127.0.0.1' || host === '') {
-                // development fallback: pass userId query param so API returns dev-owned resources
                 res = await safeFetchJson(path + (path.includes('?') ? '&' : '?') + 'userId=smoke_user');
               }
             }
@@ -120,9 +117,7 @@ export default function UniversityOverview() {
 
           const raw = await tryFetchTimetable('/api/timetable');
           let classesSrc = [];
-          const todayStr = currentDate.toISOString().slice(0,10);
 
-          // Normalize response shapes
           if (!raw) classesSrc = [];
           else if (Array.isArray(raw)) {
             if (raw.length && raw[0] && Array.isArray(raw[0].payload)) {
@@ -132,30 +127,24 @@ export default function UniversityOverview() {
             classesSrc = raw.templates.flatMap(tpl => (Array.isArray(tpl.payload) ? tpl.payload.map(p => ({ ...p, _templateId: tpl.id })) : []));
           } else classesSrc = [];
 
-          // If no module payloads found, try the timetables endpoint which includes materialized events
           if ((!Array.isArray(classesSrc) || classesSrc.length === 0)) {
-              try {
+            try {
               const tpls = await tryFetchTimetable('/api/timetables');
               if (tpls && Array.isArray(tpls.templates)) {
-                // flatten any included events on templates
                 const evSrc = tpls.templates.flatMap(t => Array.isArray(t.events) ? t.events : []);
                 if (evSrc && evSrc.length) classesSrc = evSrc;
               }
             } catch (e) { /* ignore */ }
           }
 
-          // Build today's list and week count from classesSrc when available
           let todayList = [];
           let weekCount = 0;
-          // Helper to determine if an item represents a lecture
           const isLectureItem = (it) => {
             try {
               const t = (it && (it.type || (it.raw && it.raw.type) || it.eventType || '')).toString().toLowerCase();
               return t === 'lecture';
             } catch (e) { return false; }
           };
-          // Convert a date-like value into a local YYYY-MM-DD string (safe against
-          // date-only strings being parsed as UTC). Returns null on invalid input.
           const toLocalYmd = (v) => {
             try {
               const dt = new Date(String(v));
@@ -190,15 +179,15 @@ export default function UniversityOverview() {
 
                 if (c.date && !c.repeat && c.repeatOption !== 'weekly' && c.dayOfWeek == null) {
                   const d = (typeof c.date === 'string' && c.date.length >= 10) ? c.date.slice(0,10) : (new Date(c.date)).toISOString().slice(0,10);
-                    try {
-                      const dd = new Date(d);
-                      const ddY = toLocalYmd(dd);
-                      if (ddY && todayYmd && ddY === todayYmd && isLectureItem(c)) todayList.push({ id: c.id || `tt-${d}`, code: c.code || c.module || (c.subject||'').split(' ')[0] || 'TBA', name: c.title || c.subject || c.module || 'Lecture', time: start ? `${start} - ${end}` : '', instructor: c.instructor || c.lecturer || '', location: c.location || '' });
-                      if (!isNaN(dd.getTime())) {
-                        const ddMid = new Date(dd.getFullYear(), dd.getMonth(), dd.getDate());
-                        if (ddMid >= startWeek && ddMid <= endWeek && isLectureItem(c)) weekCount++;
-                      }
-                    } catch (e) {}
+                  try {
+                    const dd = new Date(d);
+                    const ddY = toLocalYmd(dd);
+                    if (ddY && todayYmd && ddY === todayYmd && isLectureItem(c)) todayList.push({ id: c.id || `tt-${d}`, code: c.code || c.module || (c.subject||'').split(' ')[0] || 'TBA', name: c.title || c.subject || c.module || 'Lecture', time: start ? `${start} - ${end}` : '', instructor: c.instructor || c.lecturer || '', location: c.location || '' });
+                    if (!isNaN(dd.getTime())) {
+                      const ddMid = new Date(dd.getFullYear(), dd.getMonth(), dd.getDate());
+                      if (ddMid >= startWeek && ddMid <= endWeek && isLectureItem(c)) weekCount++;
+                    }
+                  } catch (e) {}
                   continue;
                 }
 
@@ -222,15 +211,11 @@ export default function UniversityOverview() {
                   } catch (e) {}
                 }
               }
-            } catch (e) {
-              // ignore per-item errors
-            }
+            } catch (e) {}
           } else {
-            // fallback to events
-              try {
+            try {
               const evs = await safeFetchJson('/api/events');
-              setDebugEventsRaw(evs);
-                if (evs && Array.isArray(evs.events)) {
+              if (evs && Array.isArray(evs.events)) {
                 todayList = evs.events.filter(e => {
                   const t = (e && (e.type || (e.raw && e.raw.type) || '')).toString().toLowerCase();
                   if (t !== 'lecture') return false;
@@ -265,7 +250,7 @@ export default function UniversityOverview() {
                   }, 0);
                 } catch (e) { weekCount = 0; }
               }
-            } catch (e) { /* ignore */ }
+            } catch (e) {}
           }
 
           if (mounted) {
@@ -273,9 +258,7 @@ export default function UniversityOverview() {
             setTodayClasses(finalToday);
             setWeekClassesCount(weekCount || 0);
 
-            // Compute a short list of next upcoming classes from events (always show next N instances)
             try {
-              // helper: convert to local date-only (midnight) for fair comparisons
               const toLocalMidnight = (d) => {
                 try {
                   const dt = new Date(d);
@@ -285,7 +268,7 @@ export default function UniversityOverview() {
               };
 
               const todayMid = toLocalMidnight(new Date());
-              const upcomingLimit = 3; // show the next 2-4 instances; default to 3
+              const upcomingLimit = 3;
 
               const evs = await safeFetchJson('/api/events');
               if (evs && Array.isArray(evs.events)) {
@@ -301,7 +284,6 @@ export default function UniversityOverview() {
                     instructor: e.instructor || ''
                   }))
                   .map(e => ({ ...e, _dateObj: toLocalMidnight(e.date) }))
-                  // only future (strictly after today)
                   .filter(e => e._dateObj && e._dateObj.getTime() > todayMid.getTime())
                   .sort((a,b) => a._dateObj - b._dateObj)
                   .slice(0, 12)
@@ -339,12 +321,9 @@ export default function UniversityOverview() {
           }
         } finally { setIsLoadingDeadlines(false); }
 
-        // GRADES: intentionally removed from overview to reduce clutter
-
         // QUICK STATS
         setIsLoadingQuickStats(true);
         try {
-          // Use courses state (which may have been populated) for credits
           const courseList = Array.isArray(coursesBody?.courses) ? coursesBody.courses : (Array.isArray(courses) ? courses : []);
           const creditsSum = courseList.reduce((s, c) => s + (Number(c.credits || c.credit || 0)), 0);
 
@@ -362,7 +341,6 @@ export default function UniversityOverview() {
             }, 0);
           }
 
-          // Compute GPA from gradesPayload if available
           const gradesForStats = await safeFetchJson('/api/grades') || { data: [] };
           let avgPercentage = null;
           if (gradesForStats && Array.isArray(gradesForStats.data) && gradesForStats.data.length) {
@@ -374,7 +352,7 @@ export default function UniversityOverview() {
               for (const cat of cats) {
                 const weight = Number(cat.weight || 0);
                 totalWeight += weight;
-                const items = cat.items || cat.items || [];
+                const items = cat.items || [];
                 if (!items.length) continue;
                 const avg = items.reduce((ss, it) => ss + ((it.score || it.grade || 0) / (it.maxScore || it.maxGrade || 100) * 100), 0) / items.length;
                 weighted += (avg * weight) / 100;
@@ -387,11 +365,9 @@ export default function UniversityOverview() {
 
           const gpa = avgPercentage !== null ? Math.round(((avgPercentage / 100) * 4) * 100) / 100 : null;
 
-          // Attendance & study hours (aggregate across all courses)
           let attendanceRate = null;
           try {
             if (courseList && courseList.length) {
-              // fetch attendance for each course in parallel (best-effort), but ignore courses without id
               const courseIds = courseList.map(c => c && c.id).filter(Boolean);
               if (courseIds.length) {
                 const promises = courseIds.map(id => safeFetchJson(`/api/attendance?courseId=${id}`));
@@ -410,16 +386,12 @@ export default function UniversityOverview() {
                 }
               }
             }
-          } catch (e) {
-            // ignore attendance errors
-          }
+          } catch (e) {}
 
           if (mounted) setQuickStats({ gpa, credits: creditsSum, dueThisWeek: dueCount, attendanceRate });
         } finally { setIsLoadingQuickStats(false); }
 
-      } catch (e) {
-        // ignore top-level errors for now
-      }
+      } catch (e) {}
     })();
 
     return () => { mounted = false; };
@@ -430,37 +402,38 @@ export default function UniversityOverview() {
   startOfWeek.setDate(currentDate.getDate() - currentDate.getDay());
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-gray-50 to-purple-50 dark:from-transparent dark:bg-gray-900">
+    <div className="min-h-screen bg-gradient-to-br from-gray-50 to-purple-50 dark:from-gray-900 dark:to-gray-900">
       <Head>
         <title>Overview — University Planner</title>
       </Head>
-      {/* Top Navigation (reusable) */}
       <CalendarHeader userName={userName} />
 
-      {/* Main Content */}
-      <div className="max-w-7xl mx-auto px-8 py-8">
+      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
         {/* Welcome Section */}
         <div className="mb-8">
-          <h2 className="text-4xl font-bold text-gray-900 mb-2">Good morning, {userName || 'Student'}</h2>
-          <p className="text-gray-600">Here's what's happening with your studies today</p>
+          <h2 className="text-4xl font-bold text-gray-900 dark:text-gray-100 mb-2">
+            Good morning, {isLoadingUser ? <Skeleton width="w-32" height="h-9" /> : (userName || 'Student')}
+          </h2>
+          <p className="text-gray-600 dark:text-gray-400">Here's what's happening with your studies today</p>
         </div>
 
         <div className="flex items-center justify-between mb-4">
           <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100">Overview</h3>
           <div className="flex items-center gap-3">
-            <button onClick={refreshData} className="text-sm px-3 py-1 rounded bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-700">Refresh</button>
+            <button onClick={refreshData} className="text-sm px-3 py-1 rounded bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors">
+              Refresh
+            </button>
           </div>
         </div>
 
         {/* Quick Stats */}
-        <div className="grid grid-cols-1 md:grid-cols-4 gap-6 mb-8">
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
           <StatCard
             icon={<TrendingUp className="w-6 h-6 text-purple-600 dark:text-purple-400" />}
             label="Current GPA"
             value={quickStats.gpa !== null ? quickStats.gpa.toFixed(2) : '—'}
             loading={isLoadingQuickStats}
             accent="purple"
-            smallIconClass="bg-purple-50 dark:bg-purple-900/30"
           />
           <StatCard
             icon={<BookOpen className="w-6 h-6 text-blue-600 dark:text-blue-400" />}
@@ -468,7 +441,6 @@ export default function UniversityOverview() {
             value={quickStats.credits !== null ? quickStats.credits : '—'}
             loading={isLoadingQuickStats}
             accent="blue"
-            smallIconClass="bg-blue-50 dark:bg-blue-900/30"
           />
           <StatCard
             icon={<AlertCircle className="w-6 h-6 text-orange-600 dark:text-orange-400" />}
@@ -476,7 +448,6 @@ export default function UniversityOverview() {
             value={quickStats.dueThisWeek !== null ? quickStats.dueThisWeek : '0'}
             loading={isLoadingQuickStats}
             accent="orange"
-            smallIconClass="bg-orange-50 dark:bg-orange-900/30"
           />
           <StatCard
             icon={<Users className="w-6 h-6 text-green-600 dark:text-green-400" />}
@@ -484,17 +455,16 @@ export default function UniversityOverview() {
             value={quickStats.attendanceRate !== null ? `${quickStats.attendanceRate}%` : '—'}
             loading={isLoadingQuickStats}
             accent="green"
-            smallIconClass="bg-green-50 dark:bg-green-900/30"
           />
         </div>
 
         {/* Main Grid */}
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-          {/* Left Column - Today's Schedule & Deadlines */}
+          {/* Left Column */}
           <div className="lg:col-span-2 space-y-6">
             {/* Today's Classes */}
             <div className="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-100 dark:border-gray-700 overflow-hidden">
-              <div className="bg-gradient-to-r from-purple-600 to-purple-700 px-6 py-4">
+              <div className="bg-gradient-to-r from-purple-600 to-purple-700 dark:from-purple-700 dark:to-purple-800 px-6 py-4">
                 <div className="flex items-center justify-between">
                   <h3 className="text-xl font-bold text-white">Today's Classes</h3>
                   <span className="text-sm text-purple-100">{currentDate.toLocaleDateString(undefined, { weekday: 'long', month: 'short', day: 'numeric' })}</span>
@@ -502,50 +472,64 @@ export default function UniversityOverview() {
               </div>
               
               <div className="p-6">
-                {todayClasses.length > 0 ? (
+                {isLoadingClasses ? (
+                  <div className="space-y-3">
+                    {[1,2,3].map(i => (
+                      <div key={i} className="bg-gray-50 dark:bg-gray-700/50 rounded-lg p-4 animate-pulse">
+                        <div className="flex items-start gap-4">
+                          <div className="w-12 h-12 bg-gray-200 dark:bg-gray-600 rounded-lg"></div>
+                          <div className="flex-1 space-y-2">
+                            <div className="h-4 bg-gray-200 dark:bg-gray-600 rounded w-1/3"></div>
+                            <div className="h-3 bg-gray-200 dark:bg-gray-600 rounded w-2/3"></div>
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                ) : todayClasses.length > 0 ? (
                   <div className="space-y-3">
                     {todayClasses.map((cls) => {
-                        const ymd = cls.date || cls.dateStr || currentDate.toISOString().slice(0,10);
-                        const goto = () => { window.location.href = `/calendar?date=${encodeURIComponent(String(ymd).slice(0,10))}`; };
-                        return (
-                          <div key={cls.id} tabIndex={0} role="button" onClick={goto} onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') goto(); }} className="group bg-gray-50 dark:bg-gray-700/50 rounded-lg p-4 hover:bg-purple-50 dark:hover:bg-purple-900/20 transition-all duration-200 border border-transparent hover:border-purple-200 dark:hover:border-purple-800 cursor-pointer focus:outline-none focus:ring-2 focus:ring-purple-300">
-                            <div className="flex items-start justify-between mb-3">
-                              <div className="flex items-start gap-4 flex-1">
-                                <div className="w-12 h-12 bg-white dark:bg-gray-800 rounded-lg flex items-center justify-center flex-shrink-0 shadow-sm border border-gray-200 dark:border-gray-600 group-hover:border-purple-300 dark:group-hover:border-purple-700 transition-colors">
-                                  <GraduationCap className="w-6 h-6 text-purple-600 dark:text-purple-400" />
-                                </div>
-                                <div className="flex-1 min-w-0">
-                                  <div className="flex items-center gap-2 mb-2">
-                                    <span className="inline-flex items-center px-2.5 py-0.5 rounded-md text-xs font-semibold bg-purple-100 dark:bg-purple-900/50 text-purple-700 dark:text-purple-300">{cls.code}</span>
-                                    <span className="text-base font-semibold text-gray-900 dark:text-gray-100 truncate">{cls.name}</span>
-                                  </div>
-                                  <div className="flex flex-col gap-1.5 text-sm">
-                                    {cls.instructor && (
-                                      <div className="flex items-center gap-2 text-gray-600 dark:text-gray-400">
-                                        <Users className="w-3.5 h-3.5 flex-shrink-0" />
-                                        <span className="truncate">{cls.instructor}</span>
-                                      </div>
-                                    )}
-                                    {cls.location && (
-                                      <div className="flex items-center gap-2 text-gray-600 dark:text-gray-400">
-                                        <svg className="w-3.5 h-3.5 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z" />
-                                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 11a3 3 0 11-6 0 3 3 0 016 0z" />
-                                        </svg>
-                                        <span className="truncate">{cls.location}</span>
-                                      </div>
-                                    )}
-                                  </div>
-                                </div>
+                      const ymd = cls.date || cls.dateStr || currentDate.toISOString().slice(0,10);
+                      const goto = () => { window.location.href = `/calendar?date=${encodeURIComponent(String(ymd).slice(0,10))}`; };
+                      return (
+                        <div key={cls.id} tabIndex={0} role="button" onClick={goto} onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') goto(); }} className="group bg-gray-50 dark:bg-gray-700/50 rounded-lg p-4 hover:bg-purple-50 dark:hover:bg-purple-900/20 transition-all duration-200 border border-transparent hover:border-purple-200 dark:hover:border-purple-800 cursor-pointer focus:outline-none focus:ring-2 focus:ring-purple-300 dark:focus:ring-purple-700">
+                          <div className="flex items-start justify-between mb-3">
+                            <div className="flex items-start gap-4 flex-1">
+                              <div className="w-12 h-12 bg-white dark:bg-gray-800 rounded-lg flex items-center justify-center flex-shrink-0 shadow-sm border border-gray-200 dark:border-gray-600 group-hover:border-purple-300 dark:group-hover:border-purple-700 transition-colors">
+                                <GraduationCap className="w-6 h-6 text-purple-600 dark:text-purple-400" />
                               </div>
-                              <div className="flex items-center gap-2 px-3 py-1.5 bg-white dark:bg-gray-800 rounded-lg text-sm font-semibold text-gray-700 dark:text-gray-300 shadow-sm border border-gray-200 dark:border-gray-600 whitespace-nowrap ml-4">
-                                <Clock className="w-4 h-4 text-purple-600 dark:text-purple-400" />
-                                {cls.time}
+                              <div className="flex-1 min-w-0">
+                                <div className="flex items-center gap-2 mb-2">
+                                  <span className="inline-flex items-center px-2.5 py-0.5 rounded-md text-xs font-semibold bg-purple-100 dark:bg-purple-900/50 text-purple-700 dark:text-purple-300">{cls.code}</span>
+                                  <span className="text-base font-semibold text-gray-900 dark:text-gray-100 truncate">{cls.name}</span>
+                                </div>
+                                <div className="flex flex-col gap-1.5 text-sm">
+                                  {cls.instructor && (
+                                    <div className="flex items-center gap-2 text-gray-600 dark:text-gray-400">
+                                      <Users className="w-3.5 h-3.5 flex-shrink-0" />
+                                      <span className="truncate">{cls.instructor}</span>
+                                    </div>
+                                  )}
+                                  {cls.location && (
+                                    <div className="flex items-center gap-2 text-gray-600 dark:text-gray-400">
+                                      <svg className="w-3.5 h-3.5 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z" />
+                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 11a3 3 0 11-6 0 3 3 0 016 0z" />
+                                      </svg>
+                                      <span className="truncate">{cls.location}</span>
+                                    </div>
+                                  )}
+                                </div>
                               </div>
                             </div>
+                            <div className="flex items-center gap-2 px-3 py-1.5 bg-white dark:bg-gray-800 rounded-lg text-sm font-semibold text-gray-700 dark:text-gray-300 shadow-sm border border-gray-200 dark:border-gray-600 whitespace-nowrap ml-4">
+                              <Clock className="w-4 h-4 text-purple-600 dark:text-purple-400" />
+                              {cls.time}
+                            </div>
                           </div>
-                        );
-                      })}
+                        </div>
+                      );
+                    })}
                   </div>
                 ) : (
                   <div className="text-center py-12">
@@ -585,71 +569,93 @@ export default function UniversityOverview() {
             {/* Upcoming Deadlines */}
             <div className="bg-white dark:bg-gray-800 rounded-xl p-6 shadow-sm border border-gray-100 dark:border-gray-700">
               <div className="flex items-center justify-between mb-6">
-                <h3 className="text-xl font-bold text-gray-900">Upcoming Deadlines</h3>
-                <button className="text-purple-600 font-medium text-sm hover:text-purple-700">View All</button>
+                <h3 className="text-xl font-bold text-gray-900 dark:text-gray-100">Upcoming Deadlines</h3>
+                <button className="text-purple-600 dark:text-purple-400 font-medium text-sm hover:text-purple-700 dark:hover:text-purple-300 transition-colors" onClick={() => window.location.href = '/calendar'}>
+                  View All
+                </button>
               </div>
               
+              {isLoadingDeadlines ? (
                 <div className="space-y-3">
-                {upcomingDeadlines.map((deadline) => (
-                  <div key={deadline.id} className="flex items-center justify-between p-4 border border-gray-200 rounded-lg hover:border-purple-300 transition-colors">
-                    <div className="flex items-start gap-3">
-                      <div className={`w-10 h-10 rounded-lg flex items-center justify-center flex-shrink-0 ${
-                        deadline.type === 'exam' ? 'bg-red-200 dark:bg-red-800' : 'bg-blue-200 dark:bg-blue-800'
+                  {[1,2,3].map(i => (
+                    <div key={i} className="flex items-center justify-between p-4 border border-gray-200 dark:border-gray-700 rounded-lg animate-pulse">
+                      <div className="flex items-start gap-3 flex-1">
+                        <div className="w-10 h-10 bg-gray-200 dark:bg-gray-600 rounded-lg"></div>
+                        <div className="flex-1 space-y-2">
+                          <div className="h-4 bg-gray-200 dark:bg-gray-600 rounded w-3/4"></div>
+                          <div className="h-3 bg-gray-200 dark:bg-gray-600 rounded w-1/2"></div>
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              ) : upcomingDeadlines.length > 0 ? (
+                <div className="space-y-3">
+                  {upcomingDeadlines.map((deadline) => (
+                    <div key={deadline.id} className="flex items-center justify-between p-4 border border-gray-200 dark:border-gray-700 rounded-lg hover:border-purple-300 dark:hover:border-purple-700 transition-colors">
+                      <div className="flex items-start gap-3">
+                        <div className={`w-10 h-10 rounded-lg flex items-center justify-center flex-shrink-0 ${
+                          deadline.type === 'exam' ? 'bg-red-100 dark:bg-red-900/30' : 'bg-blue-100 dark:bg-blue-900/30'
+                        }`}>
+                          {deadline.type === 'exam' ? (
+                            <AlertCircle className={`w-5 h-5 ${deadline.type === 'exam' ? 'text-red-600 dark:text-red-400' : 'text-blue-600 dark:text-blue-400'}`} />
+                          ) : (
+                            <CheckCircle className="w-5 h-5 text-blue-600 dark:text-blue-400" />
+                          )}
+                        </div>
+                        <div>
+                          <p className="font-medium text-gray-900 dark:text-gray-100 mb-1">{deadline.title}</p>
+                          <p className="text-sm text-gray-600 dark:text-gray-400">{deadline.dueDate}</p>
+                        </div>
+                      </div>
+                      <div className={`px-3 py-1 rounded-full text-sm font-medium ${
+                        deadline.daysLeft <= 2 ? 'bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-400' : 
+                        deadline.daysLeft <= 5 ? 'bg-orange-100 dark:bg-orange-900/30 text-orange-700 dark:text-orange-400' : 
+                        'bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400'
                       }`}>
-                        {deadline.type === 'exam' ? (
-                          <AlertCircle className={`w-5 h-5 ${deadline.type === 'exam' ? 'text-red-600 dark:text-red-200' : 'text-blue-600 dark:text-blue-200'}`} />
-                        ) : (
-                          <CheckCircle className="w-5 h-5 text-blue-600 dark:text-blue-200" />
-                        )}
-                      </div>
-                      <div>
-                        <p className="font-medium text-gray-900 mb-1">{deadline.title}</p>
-                        <p className="text-sm text-gray-600">{deadline.dueDate}</p>
+                        {deadline.daysLeft} days
                       </div>
                     </div>
-                    <div className={`px-3 py-1 rounded-full text-sm font-medium ${
-                      deadline.daysLeft <= 2 ? 'bg-red-100 text-red-700' : 
-                      deadline.daysLeft <= 5 ? 'bg-orange-100 text-orange-700' : 
-                      'bg-green-100 text-green-700'
-                    }`}>
-                      {deadline.daysLeft} days
-                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div className="text-center py-12">
+                  <div className="inline-flex items-center justify-center w-16 h-16 bg-gray-100 dark:bg-gray-700 rounded-full mb-4">
+                    <CheckCircle className="w-8 h-8 text-gray-400 dark:text-gray-500" />
                   </div>
-                ))}
-              </div>
-              {upcomingDeadlines.length === 0 && (
-                <div className="text-center py-6">
-                  <p className="text-gray-500">No upcoming deadlines found</p>
-                  <button className="mt-3 text-sm text-purple-600 hover:text-purple-700" onClick={() => window.location.href = '/events'}>Create an event</button>
+                  <p className="text-gray-600 dark:text-gray-400 font-medium mb-2">No upcoming deadlines</p>
+                  <p className="text-sm text-gray-500 dark:text-gray-500 mb-4">You're all caught up!</p>
+                  <button className="inline-flex items-center gap-2 px-4 py-2 text-sm font-medium text-purple-600 dark:text-purple-400 hover:text-purple-700 dark:hover:text-purple-300 hover:bg-purple-50 dark:hover:bg-purple-900/20 rounded-lg transition-colors" onClick={() => window.location.href = '/calendar'}>
+                    <Plus className="w-4 h-4" />
+                    Create Event
+                  </button>
                 </div>
               )}
             </div>
-
-            {/* Recent Grades removed per request */}
           </div>
 
-          {/* Right Column - Quick Actions & This Week */}
+          {/* Right Column */}
           <div className="space-y-6">
             {/* Quick Actions */}
-            <div className="bg-white rounded-xl p-6 shadow-sm border border-gray-100">
-              <h3 className="text-xl font-bold text-gray-900 mb-4">Quick Actions</h3>
+            <div className="bg-white dark:bg-gray-800 rounded-xl p-6 shadow-sm border border-gray-100 dark:border-gray-700">
+              <h3 className="text-xl font-bold text-gray-900 dark:text-gray-100 mb-4">Quick Actions</h3>
               <div className="space-y-3">
-                <button className="w-full bg-purple-600 text-white py-3 rounded-lg font-medium hover:bg-purple-700 transition-colors flex items-center justify-center gap-2" onClick={() => window.location.href = '/calendar'}>
+                <button className="w-full bg-purple-600 dark:bg-purple-700 text-white py-3 rounded-lg font-medium hover:bg-purple-700 dark:hover:bg-purple-600 transition-colors flex items-center justify-center gap-2" onClick={() => window.location.href = '/calendar'}>
                   <Calendar className="w-5 h-5" />
                   Open Calendar
                 </button>
-                <button className="w-full bg-white border-2 border-purple-600 text-purple-600 py-3 rounded-lg font-medium hover:bg-purple-50 transition-colors" onClick={() => window.location.href = '/calendar'}>
+                <button className="w-full bg-white dark:bg-gray-700 border-2 border-purple-600 dark:border-purple-500 text-purple-600 dark:text-purple-400 py-3 rounded-lg font-medium hover:bg-purple-50 dark:hover:bg-purple-900/20 transition-colors" onClick={() => window.location.href = '/calendar'}>
                   Create Event
                 </button>
-                <button className="w-full bg-white border border-gray-300 text-gray-700 py-3 rounded-lg font-medium hover:bg-gray-50 transition-colors" onClick={() => window.location.href = '/modules'}>
+                <button className="w-full bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 py-3 rounded-lg font-medium hover:bg-gray-50 dark:hover:bg-gray-600 transition-colors" onClick={() => window.location.href = '/modules'}>
                   View Modules
                 </button>
               </div>
             </div>
 
             {/* This Week Overview */}
-            <div className="bg-white rounded-xl p-6 shadow-sm border border-gray-100">
-              <h3 className="text-xl font-bold text-gray-900 mb-4">This Week</h3>
+            <div className="bg-white dark:bg-gray-800 rounded-xl p-6 shadow-sm border border-gray-100 dark:border-gray-700">
+              <h3 className="text-xl font-bold text-gray-900 dark:text-gray-100 mb-4">This Week</h3>
               <div className="grid grid-cols-7 gap-2 mb-4">
                 {weekDays.map((day, idx) => {
                   const date = new Date(startOfWeek);
@@ -658,9 +664,9 @@ export default function UniversityOverview() {
                   
                   return (
                     <div key={day} className="text-center">
-                      <div className="text-xs text-gray-600 mb-2">{day}</div>
+                      <div className="text-xs text-gray-600 dark:text-gray-400 mb-2">{day}</div>
                       <div className={`w-10 h-10 mx-auto rounded-lg flex items-center justify-center text-sm font-medium ${
-                        isToday ? 'bg-purple-600 text-white' : 'bg-gray-100 text-gray-700'
+                        isToday ? 'bg-purple-600 dark:bg-purple-700 text-white' : 'bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300'
                       }`}>
                         {date.getDate()}
                       </div>
@@ -669,59 +675,53 @@ export default function UniversityOverview() {
                 })}
               </div>
               <div className="space-y-2 text-sm">
-                <div className="flex items-center justify-between py-2 border-t border-gray-100">
-                  <span className="text-gray-600">Classes this week</span>
-                  <span className="font-semibold text-gray-900">{weekClassesCount ?? 0}</span>
+                <div className="flex items-center justify-between py-2 border-t border-gray-100 dark:border-gray-700">
+                  <span className="text-gray-600 dark:text-gray-400">Classes this week</span>
+                  <span className="font-semibold text-gray-900 dark:text-gray-100">{weekClassesCount ?? 0}</span>
                 </div>
-                <div className="flex items-center justify-between py-2 border-t border-gray-100">
-                  <span className="text-gray-600">Assignments due</span>
-                  <span className="font-semibold text-gray-900">{assignmentsDueCount ?? 0}</span>
+                <div className="flex items-center justify-between py-2 border-t border-gray-100 dark:border-gray-700">
+                  <span className="text-gray-600 dark:text-gray-400">Assignments due</span>
+                  <span className="font-semibold text-gray-900 dark:text-gray-100">{assignmentsDueCount ?? 0}</span>
                 </div>
-                <div className="flex items-center justify-between py-2 border-t border-gray-100">
-                  <span className="text-gray-600">Study hours logged</span>
-                  <span className="font-semibold text-gray-900">{studyHoursLogged ?? 0}</span>
+                <div className="flex items-center justify-between py-2 border-t border-gray-100 dark:border-gray-700">
+                  <span className="text-gray-600 dark:text-gray-400">Study hours logged</span>
+                  <span className="font-semibold text-gray-900 dark:text-gray-100">{studyHoursLogged ?? 0}</span>
                 </div>
               </div>
             </div>
 
             {/* Active Modules */}
-            <div className="bg-white rounded-xl p-6 shadow-sm border border-gray-100">
-              <h3 className="text-xl font-bold text-gray-900 mb-4">Active Modules</h3>
+            <div className="bg-white dark:bg-gray-800 rounded-xl p-6 shadow-sm border border-gray-100 dark:border-gray-700">
+              <h3 className="text-xl font-bold text-gray-900 dark:text-gray-100 mb-4">Active Modules</h3>
               <div className="space-y-3">
-                {courses && courses.length ? (
+                {courses && courses.length > 0 ? (
                   courses.slice(0,6).map((c, idx) => (
-                    <div key={c.id || idx} className={`flex items-center gap-3 p-3 rounded-lg ${idx % 3 === 0 ? 'bg-blue-200 dark:bg-blue-900' : idx % 3 === 1 ? 'bg-green-200 dark:bg-green-900' : 'bg-purple-300 dark:bg-purple-900'}`}>
-                      <div className={`w-3 h-3 ${idx % 3 === 0 ? 'bg-blue-800 dark:bg-blue-300' : idx % 3 === 1 ? 'bg-green-800 dark:bg-green-300' : 'bg-purple-800 dark:bg-purple-300'} rounded-full`}></div>
+                    <div key={c.id || idx} className={`flex items-center gap-3 p-3 rounded-lg ${
+                      idx % 3 === 0 ? 'bg-blue-100 dark:bg-blue-900/30' : 
+                      idx % 3 === 1 ? 'bg-green-100 dark:bg-green-900/30' : 
+                      'bg-purple-100 dark:bg-purple-900/30'
+                    }`}>
+                      <div className={`w-3 h-3 ${
+                        idx % 3 === 0 ? 'bg-blue-600 dark:bg-blue-400' : 
+                        idx % 3 === 1 ? 'bg-green-600 dark:bg-green-400' : 
+                        'bg-purple-600 dark:bg-purple-400'
+                      } rounded-full`}></div>
                       <div>
-                        <p className="font-medium text-gray-900 text-sm">{c.code || c.courseCode || c.code}</p>
-                        <p className="text-xs text-gray-600">{c.name || c.title || c.module || c.courseName}</p>
+                        <p className="font-medium text-gray-900 dark:text-gray-100 text-sm">{c.code || c.courseCode}</p>
+                        <p className="text-xs text-gray-600 dark:text-gray-400">{c.name || c.title || c.module || c.courseName}</p>
                       </div>
                     </div>
                   ))
                 ) : (
-                  <>
-                    <div className="flex items-center gap-3 p-3 bg-blue-200 dark:bg-blue-900 rounded-lg">
-                      <div className="w-3 h-3 bg-blue-800 dark:bg-blue-300 rounded-full"></div>
-                      <div>
-                        <p className="font-medium text-gray-900 text-sm">CE304</p>
-                        <p className="text-xs text-gray-600">Embedded Systems</p>
-                      </div>
+                  <div className="text-center py-8">
+                    <div className="inline-flex items-center justify-center w-12 h-12 bg-gray-100 dark:bg-gray-700 rounded-full mb-3">
+                      <BookOpen className="w-6 h-6 text-gray-400 dark:text-gray-500" />
                     </div>
-                    <div className="flex items-center gap-3 p-3 bg-green-200 dark:bg-green-900 rounded-lg">
-                      <div className="w-3 h-3 bg-green-800 dark:bg-green-300 rounded-full"></div>
-                      <div>
-                        <p className="font-medium text-gray-900 text-sm">CSE304</p>
-                        <p className="text-xs text-gray-600">Human Computer Interface</p>
-                      </div>
-                    </div>
-                    <div className="flex items-center gap-3 p-3 bg-purple-300 dark:bg-purple-900 rounded-lg">
-                      <div className="w-3 h-3 bg-purple-800 dark:bg-purple-300 rounded-full"></div>
-                      <div>
-                        <p className="font-medium text-gray-900 text-sm">SE403</p>
-                        <p className="text-xs text-gray-600">Secure Software Development</p>
-                      </div>
-                    </div>
-                  </>
+                    <p className="text-gray-600 dark:text-gray-400 text-sm mb-3">No modules yet</p>
+                    <button className="text-sm text-purple-600 dark:text-purple-400 hover:text-purple-700 dark:hover:text-purple-300 font-medium" onClick={() => window.location.href = '/modules'}>
+                      Add modules
+                    </button>
+                  </div>
                 )}
               </div>
             </div>

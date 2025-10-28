@@ -8,6 +8,7 @@ import * as NextUI from '@nextui-org/react'
 import { ThemeProvider as NextThemesProvider } from 'next-themes'
 import { NextUIProvider as NextUISystemProvider } from '@nextui-org/system'
 import React, { useEffect, useState } from 'react'
+import ModalProvider from '@/providers/modal-context'
 
 function NavEnhancer() {
   useEffect(() => {
@@ -143,7 +144,9 @@ export default function App({ Component, pageProps }) {
   return (
     <NextThemesProvider attribute="class" defaultTheme="system">
       <NextUISystemProvider navigate={undefined}>
-        {content}
+        <ModalProvider>
+          {content}
+        </ModalProvider>
       </NextUISystemProvider>
     </NextThemesProvider>
   );

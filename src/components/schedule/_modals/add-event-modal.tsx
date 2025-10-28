@@ -62,6 +62,7 @@ export default function AddEventModal({
   CustomAddEventModal?: React.FC<{ register: any; errors: any }>;
 }) {
   const { setClose, data } = useModal();
+  const [origin, setOrigin] = useState<string | undefined>(undefined);
   // Modal data may be provided in several shapes depending on caller:
   // - fetch callback returns the event directly -> data = { default: { /* event */ } }
   // - fetch callback returns { default: event } -> data = { default: { default: event } }
@@ -70,7 +71,18 @@ export default function AddEventModal({
   const fetched = data?.default ?? data ?? null as any;
   const unwrapped = fetched && (fetched.default ?? fetched) as any;
   const eventData = unwrapped && typeof unwrapped === 'object' && Object.keys(unwrapped).length ? (unwrapped as Event) : null;
-  const { handlers } = useScheduler();
+  // useScheduler is only provided inside SchedulerProvider (used by timetable).
+  // When this modal is opened from pages that don't mount SchedulerProvider
+  // (e.g. Calendar page), calling useScheduler() will throw. Guard it so the
+  // modal still works and falls back to direct fetch calls when handlers are
+  // not available.
+  let handlers: any = {};
+  try {
+    const sched = useScheduler();
+    handlers = sched?.handlers || {};
+  } catch (e) {
+    handlers = {};
+  }
 
   // Helper: parse incoming date-like values (string or Date) into Date objects
   const parseToDate = (v: any): Date => {
@@ -144,6 +156,20 @@ export default function AddEventModal({
       setSelectedType(type);
     }
   }, [eventData, reset]);
+
+  // If caller provided an anchor rectangle in modal data, compute a transform-origin
+  useEffect(() => {
+    try {
+      const a = (data as any)?.anchor;
+      if (a && typeof a.left === 'number' && typeof a.top === 'number') {
+        const x = Math.round(a.left + ((a.width && typeof a.width === 'number') ? a.width / 2 : 0));
+        const y = Math.round(a.top + ((a.height && typeof a.height === 'number') ? a.height / 2 : 0));
+        setOrigin(`${x}px ${y}px`);
+        return;
+      }
+    } catch (e) { /* ignore */ }
+    setOrigin(undefined);
+  }, [data]);
 
   const handleColorChange = (colorKey: string) => {
     const color = COLORS.find(c => c.key === colorKey);
@@ -424,7 +450,7 @@ export default function AddEventModal({
   // Recurrence page - REDESIGNED with compact layout
   if (modalPage === 1) {
     return (
-      <div className="w-full max-h-[85vh] bg-white dark:bg-gray-950 overflow-y-auto">
+  <div style={{ transformOrigin: origin || 'center', animation: origin ? 'popIn 160ms cubic-bezier(.2,.9,.25,1)' : undefined }} className="w-full max-h-[85vh] bg-white dark:bg-gray-950 overflow-y-auto">
         <style dangerouslySetInnerHTML={{__html: `
           @keyframes slideIn {
             from {
@@ -435,6 +461,10 @@ export default function AddEventModal({
               opacity: 1;
               transform: translateY(0);
             }
+          }
+          @keyframes popIn {
+            from { opacity: 0; transform: scale(0.96); }
+            to { opacity: 1; transform: scale(1); }
           }
           .animate-in {
             animation: slideIn 0.2s ease-out;
@@ -700,7 +730,7 @@ export default function AddEventModal({
 
   // Main form - ENHANCED with compact layout
   return (
-    <div className="w-full max-h-[85vh] bg-white dark:bg-gray-950 overflow-y-auto">
+  <div style={{ transformOrigin: origin || 'center', animation: origin ? 'popIn 160ms cubic-bezier(.2,.9,.25,1)' : undefined }} className="w-full max-h-[85vh] bg-white dark:bg-gray-950 overflow-y-auto">
       <style dangerouslySetInnerHTML={{__html: `
         @keyframes slideIn {
           from {
@@ -712,21 +742,22 @@ export default function AddEventModal({
             transform: translateY(0);
           }
         }
+        @keyframes popIn {
+          from { opacity: 0; transform: scale(0.96); }
+          to { opacity: 1; transform: scale(1); }
+        }
         .animate-in {
           animation: slideIn 0.2s ease-out;
         }
+        /* Hide dropdown scrollbars visually while keeping scroll functional */
+        .dropdown-scroll {
+          scrollbar-width: none; /* Firefox */
+          -ms-overflow-style: none; /* IE 10+ */
+        }
         .dropdown-scroll::-webkit-scrollbar {
-          width: 6px;
-        }
-        .dropdown-scroll::-webkit-scrollbar-track {
-          background: #1f2937;
-        }
-        .dropdown-scroll::-webkit-scrollbar-thumb {
-          background: #4b5563;
-          border-radius: 3px;
-        }
-        .dropdown-scroll::-webkit-scrollbar-thumb:hover {
-          background: #6b7280;
+          width: 0px;
+          height: 0px;
+          background: transparent;
         }
         input[type="date"]::-webkit-calendar-picker-indicator,
         input[type="time"]::-webkit-calendar-picker-indicator {
@@ -859,7 +890,7 @@ export default function AddEventModal({
                           className="fixed inset-0 z-10" 
                           onClick={() => setTypeOpen(false)}
                         />
-            <div className="absolute z-20 mt-1 w-full bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 rounded-lg shadow-2xl overflow-hidden animate-in dropdown-scroll"
+            <div className="absolute z-20 mt-1 w-full bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 rounded-lg shadow-2xl overflow-hidden animate-in dropdown-scroll hide-scrollbar"
               style={{ maxHeight: '200px' }}>
                           {EVENT_TYPES.map((type) => (
                             <button 

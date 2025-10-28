@@ -239,7 +239,7 @@ export default function RecurrenceModal({
       <div>
         <Label className="text-xs font-semibold text-gray-700 mb-2 block">Preview</Label>
         <div className="border border-gray-300 rounded-lg overflow-hidden bg-gray-50">
-          <div className="max-h-28 overflow-y-auto">
+          <div className="max-h-28 overflow-y-auto hide-scrollbar">
             {previewDates.length === 0 ? (
               <div className="flex flex-col items-center justify-center py-6 text-center">
                 <Calendar className="w-5 h-5 text-gray-300 mb-1" />
