@@ -4868,6 +4868,52 @@ html.dark .event-card-list-item button[aria-label="Delete event"] {
   display: block !important;
 }
 
+/* Edit button variant used inside event tiles (blue accent) */
+.event-edit-btn {
+  background-color: transparent !important;
+  border: none !important;
+  width: 20px !important;
+  height: 20px !important;
+  padding: 0 !important;
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  border-radius: 4px !important;
+  cursor: pointer !important;
+  pointer-events: auto !important;
+  opacity: 0;
+  transform: translateY(-4px) scale(0.95);
+  transition: opacity 140ms ease, transform 140ms ease;
+}
+
+.group:hover .event-edit-btn {
+  opacity: 1 !important;
+  transform: translateY(0) scale(1) !important;
+  pointer-events: auto !important;
+}
+
+.event-edit-btn svg {
+  display: block !important;
+  width: 12px !important;
+  height: 12px !important;
+  stroke: #2563eb !important; /* blue-600 */
+  stroke-width: 2 !important;
+  fill: none !important;
+}
+
+html.dark .event-edit-btn svg {
+  stroke: #93c5fd !important; /* blue-300 in dark */
+}
+
+/* Ensure the buttons set a color so icons using `currentColor` render reliably */
+.event-edit-btn {
+  color: #2563eb !important; /* blue-600 */
+}
+
+html.dark .event-edit-btn {
+  color: #93c5fd !important; /* lighter blue in dark mode */
+}
+
 /* Hover states: move to red background on hover to match previous behavior */
 .event-item button[aria-label="Delete event"]:hover,
 .event-card button[aria-label="Delete event"]:hover,
@@ -4906,7 +4952,12 @@ html.dark .event-card-list-item button[aria-label="Delete event"]:hover {
 
 /* Ensure the delete svg icon uses explicit stroke so global theme remaps don't recolor it */
 .event-delete-btn svg {
-  stroke: currentColor; /* component sets color explicitly on svg if needed */
+  stroke: currentColor !important; /* component sets color explicitly on svg if needed */
+  stroke-width: 2 !important;
+  fill: none !important;
+  width: 12px !important;
+  height: 12px !important;
+  display: block !important;
 }
 
 /* Safe, narrow override for the small delete control used inside event tiles.
@@ -4935,6 +4986,14 @@ html.dark .event-card-list-item button[aria-label="Delete event"]:hover {
   transform: translateY(0) scale(1) !important;
   pointer-events: auto !important;
   background: rgba(255, 255, 255, 0.06) !important;
+}
+
+.event-delete-btn {
+  color: #64748b !important; /* muted gray for light mode */
+}
+
+html.dark .event-delete-btn {
+  color: rgba(203, 213, 225, 1) !important; /* light stroke in dark */
 }
 
 .event-delete-btn:hover {

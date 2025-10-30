@@ -1,14 +1,23 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useRouter } from 'next/router';
 import { GraduationCap, Mail, Lock, ArrowRight, AlertCircle, Eye, EyeOff } from 'lucide-react';
 
 export default function SignInPolished() {
-  const router = useRouter();
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [mounted, setMounted] = useState(false);
+  const router = useRouter();
+
+  // Force a remount after initial render to clear autofill styling
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setMounted(true);
+    }, 100);
+    return () => clearTimeout(timer);
+  }, []);
 
   function handleSubmit() {
     setError('');
@@ -24,7 +33,6 @@ export default function SignInPolished() {
     setTimeout(() => {
       console.log('Sign in successful');
       setLoading(false);
-      // Redirect to overview/dashboard after successful sign-in
       try {
         router.push('/overview');
       } catch (e) {
@@ -107,14 +115,16 @@ export default function SignInPolished() {
                     <Lock className="h-5 w-5" style={{ color: '#94a3b8' }} />
                   </div>
                   <input
+                    key={showPassword ? 'text' : 'password'}
                     id="password"
                     name="password"
                     type={showPassword ? "text" : "password"}
-                    autoComplete="current-password"
+                    autoComplete="off"
                     value={password}
                     onChange={(e) => setPassword(e.target.value)}
                     onKeyPress={(e) => e.key === 'Enter' && handleSubmit()}
                     placeholder="••••••••"
+                    className="password-input"
                     style={{
                       display: 'block',
                       width: '100%',
@@ -197,6 +207,7 @@ export default function SignInPolished() {
 
             {/* Sign Up Link */}
             <button
+              onClick={() => router.push('/signup')}
               className="block w-full text-center py-3 px-4 rounded-lg font-medium transition-all"
               style={{
                 border: '1px solid #cbd5e1',
@@ -204,7 +215,6 @@ export default function SignInPolished() {
                 backgroundColor: 'transparent',
                 cursor: 'pointer'
               }}
-              onClick={() => router.push('/signup')}
             >
               Create an account
             </button>
@@ -234,14 +244,22 @@ export default function SignInPolished() {
           input[name="email"],
           input[name="password"],
           input#email,
-          input#password {
+          input#password,
+          .password-input {
             background-color: #f8fafc !important;
             background: #f8fafc !important;
             background-image: none !important;
             color: #0f172a !important;
             border: 1px solid #e2e8f0 !important;
             -webkit-text-fill-color: #0f172a !important;
+            -webkit-background-clip: padding-box !important;
+            background-clip: padding-box !important;
+            -webkit-appearance: none !important;
+            appearance: none !important;
             color-scheme: light !important;
+            caret-color: #0f172a !important;
+            box-shadow: none !important;
+            -webkit-box-shadow: 0 0 0 1000px #f8fafc inset !important;
           }
           
           input[type="text"]:hover,
@@ -270,17 +288,34 @@ export default function SignInPolished() {
             opacity: 1 !important;
           }
           
-          /* Autofill overrides */
+          /* Autofill overrides (stronger) */
           input:-webkit-autofill,
           input:-webkit-autofill:hover,
           input:-webkit-autofill:focus,
-          input:-webkit-autofill:active {
+          input:-webkit-autofill:active,
+          textarea:-webkit-autofill,
+          select:-webkit-autofill,
+          input[type="password"]:-webkit-autofill,
+          :-internal-autofill-selected,
+          ::-internal-autofill-selected,
+          input:-internal-autofill-selected {
+            /* force background color above UA/autofill overlay */
             -webkit-box-shadow: 0 0 0 1000px #f8fafc inset !important;
             box-shadow: 0 0 0 1000px #f8fafc inset !important;
+            /* fallback background-image override (helps some versions) */
+            background-image: none !important;
+            background-repeat: no-repeat !important;
+            background-size: 100% 100% !important;
             -webkit-text-fill-color: #0f172a !important;
             background-color: #f8fafc !important;
             color: #0f172a !important;
             border: 1px solid #e2e8f0 !important;
+            -webkit-background-clip: padding-box !important;
+            background-clip: padding-box !important;
+            -webkit-appearance: none !important;
+            appearance: none !important;
+            transition: background-color 9999s ease-in-out 0s !important;
+            filter: none !important;
           }
         `}</style>
       </div>

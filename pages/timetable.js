@@ -1,6 +1,7 @@
 // Modern timetable page with improved light/dark theme support
 import Head from 'next/head'
 import React, { useEffect, useState } from 'react'
+import { parseDatePreserveLocal, buildLocalDateFromParts, toYMDLocal } from '../src/lib/dateHelpers';
 import dynamic from 'next/dynamic'
 import EditScopeModal from '@/components/Timetable/EditScopeModal';
 
@@ -329,13 +330,15 @@ export default function TimetablePage() {
           if (tplId) {
             const list = await fetch('/api/events').then(r => r.ok ? r.json().catch(() => null) : null);
             const eventsList = Array.isArray(list?.events) ? list.events : (Array.isArray(list) ? list : []);
-            const baseDate = new Date(event.date || (event.raw && event.raw.date) || event.startDate || null);
+            const rawVal = event && (event.date || (event.raw && event.raw.date) || event.startDate) || null;
+            const baseDate = rawVal ? (parseDatePreserveLocal(rawVal) || buildLocalDateFromParts(String(rawVal).slice(0,10)) || new Date(String(rawVal))) : null;
             const toPatch = eventsList.filter(ev => {
               const evTpl = ev && (ev.template_id || (ev.raw && (ev.raw.template_id || ev.raw.templateId))) || null;
               if (!evTpl || String(evTpl) !== String(tplId)) return false;
               try {
-                const evDate = new Date(ev.date || ev.startDate || ev.start_date || ev.startDate);
-                return evDate >= baseDate;
+                const rawEv = ev && (ev.date || ev.startDate || ev.start_date || ev.startDate) || null;
+                const evDate = rawEv ? (parseDatePreserveLocal(rawEv) || buildLocalDateFromParts(String(rawEv).slice(0,10)) || new Date(String(rawEv))) : null;
+                return evDate && baseDate ? evDate >= baseDate : false;
               } catch (e) { return false; }
             });
             for (const ev of toPatch) {

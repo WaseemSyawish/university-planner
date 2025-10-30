@@ -11,6 +11,7 @@ import { SubmitHandler, useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { EventFormData, eventSchema, Variant, Event, variants as VARIANTS } from "@/types/index";
 import { useScheduler } from "@/providers/schedular-provider";
+import { parseDatePreserveLocal, buildLocalDateFromParts, toYMDLocal } from '../../../lib/dateHelpers';
 import { v4 as uuidv4 } from "uuid";
 import EditScopeModal from "@/components/Timetable/EditScopeModal";
 
@@ -233,15 +234,17 @@ export default function AddEventModal({
       if (!listResp.ok) throw new Error('Failed to list events for bulk update');
       const listBody = await listResp.json().catch(() => null);
       const eventsList = Array.isArray(listBody?.events) ? listBody.events : (Array.isArray(listBody) ? listBody : []);
-      const baseDate = new Date((eventData as any).date || ((eventData as any).raw && (eventData as any).raw.date) || eventData.startDate || null);
+      const rawBase = (eventData as any).date || ((eventData as any).raw && (eventData as any).raw.date) || eventData.startDate || null;
+      const baseDate = rawBase ? (parseDatePreserveLocal(rawBase) || buildLocalDateFromParts(String(rawBase).slice(0,10)) || new Date(String(rawBase))) : null;
       const toApply = eventsList.filter((ev) => {
         const evAny = ev as any;
         const evTpl = evAny.template_id || (evAny.raw && (evAny.raw.template_id || evAny.raw.templateId)) || null;
         if (!evTpl || String(evTpl) !== String(tplId)) return false;
         if (scope === 'future') {
           try {
-            const evDate = new Date(ev.date || ev.startDate || ev.start_date || ev.startDate);
-            return evDate >= baseDate;
+            const rawEv = ev.date || ev.startDate || ev.start_date || ev.startDate || null;
+            const evDate = rawEv ? (parseDatePreserveLocal(rawEv) || buildLocalDateFromParts(String(rawEv).slice(0,10)) || new Date(String(rawEv))) : null;
+            return evDate && baseDate ? evDate >= baseDate : false;
           } catch (e) { return false; }
         }
         return true;

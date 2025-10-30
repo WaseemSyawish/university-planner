@@ -41,7 +41,7 @@ export default async function handler(req, res) {
           title: t.title,
           courseId: t.course_id || null,
           repeatOption: t.repeat_option || null,
-          startDate: t.start_date ? t.start_date.toISOString().slice(0,10) : null,
+          startDate: t.start_date ? `${t.start_date.getFullYear()}-${String(t.start_date.getMonth()+1).padStart(2,'0')}-${String(t.start_date.getDate()).padStart(2,'0')}` : null,
           payload,
           // Convenience mapping: if payload is an array and first item looks like a module, expose some fields
           ...(Array.isArray(payload) && payload.length > 0 && typeof payload[0] === 'object' ? { modules: payload } : {})

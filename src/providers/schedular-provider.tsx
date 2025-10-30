@@ -31,6 +31,7 @@ import { getWeek } from 'date-fns/getWeek';
 import { startOfWeekYear } from 'date-fns/startOfWeekYear';
 import { addDays } from 'date-fns/addDays';
 import ModalProvider from "./modal-context";
+import { parseDatePreserveLocal, buildLocalDateFromParts, toYMDLocal } from '../lib/dateHelpers';
 // Define event and state types
 
 interface SchedulerState {
@@ -271,20 +272,20 @@ export const SchedulerProvider = ({
     });
 
     return adjustedEvents.filter((event) => {
-      const eventStart = new Date(event.startDate);
-      const eventEnd = new Date(event.endDate);
+      const eventStart = parseDatePreserveLocal(event.startDate) || (event.startDate ? new Date(event.startDate) : null);
+      const eventEnd = parseDatePreserveLocal(event.endDate) || (event.endDate ? new Date(event.endDate) : null);
 
-      // Create new Date objects to avoid mutating `currentDate`
-      const startOfDay = new Date(currentDate);
-      startOfDay.setDate(day);
-      startOfDay.setHours(0, 0, 0, 0);
+  // Create new Date objects to avoid mutating `currentDate`
+  const startOfDay = new Date(currentDate);
+  startOfDay.setDate(day);
+  startOfDay.setHours(0, 0, 0, 0);
 
-      const endOfDay = new Date(currentDate);
-      endOfDay.setDate(day + 1);
-      endOfDay.setHours(0, 0, 0, 0);
+  const endOfDay = new Date(currentDate);
+  endOfDay.setDate(day + 1);
+  endOfDay.setHours(0, 0, 0, 0);
 
       // Check if the event starts or spans across the given day
-      const isSameDay =
+      const isSameDay = eventStart &&
         eventStart.getDate() === day &&
         eventStart.getMonth() === currentDate.getMonth() &&
         eventStart.getFullYear() === currentDate.getFullYear();
@@ -319,8 +320,13 @@ export const SchedulerProvider = ({
     }
   ) {
     // Mina-inspired minutes-based layout
-    const toMillis = (d: any) => (d instanceof Date ? d.getTime() : new Date(d).getTime());
-    const ensureDate = (d: any) => (d instanceof Date ? d : new Date(d));
+    const toMillis = (d: any) => {
+      if (d instanceof Date) return d.getTime();
+      const dt = parseDatePreserveLocal(d);
+      if (dt && !isNaN(dt.getTime())) return dt.getTime();
+      return new Date(d).getTime();
+    };
+    const ensureDate = (d: any) => (d instanceof Date ? d : (parseDatePreserveLocal(d) || new Date(d)));
 
     // Row height per hour - matches the hourly row height used in day/week views (64px)
     const ROW_PX_PER_HOUR = 64;

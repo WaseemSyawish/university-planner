@@ -5,6 +5,7 @@ import { Calendar, Plus, ChevronLeft, ChevronRight, Trash2, Edit3, X } from 'luc
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import AddEventModal from '@/components/schedule/_modals/add-event-modal';
+import { parseDatePreserveLocal, buildLocalDateFromParts, toYMDLocal } from '../src/lib/dateHelpers';
 import CustomModal from '@/components/ui/custom-modal';
 import { useModal } from '@/providers/modal-context';
 import { Input } from '@/components/ui/input';
@@ -191,7 +192,8 @@ export default function CalendarPage() {
         // future/all: fetch events list and patch matching events
         const list = await fetch('/api/events').then(r => r.ok ? r.json().catch(() => null) : null);
         const eventsList = Array.isArray(list?.events) ? list.events : (Array.isArray(list) ? list : []);
-        const baseDate = new Date(ev.date || (ev.raw && ev.raw.date) || ev.startDate || null);
+        const rawBase = ev.date || (ev.raw && ev.raw.date) || ev.startDate || null;
+        const baseDate = rawBase ? (parseDatePreserveLocal(rawBase) || buildLocalDateFromParts(String(rawBase).slice(0,10)) || new Date(String(rawBase))) : null;
         const toPatch = eventsList.filter(ei => {
           const evTpl = ei && (ei.template_id || (ei.raw && (ei.raw.template_id || ei.raw.templateId))) || null;
           if (!evTpl || String(evTpl) !== String(tplId)) return false;
@@ -440,6 +442,32 @@ export default function CalendarPage() {
 
     return () => { cancelled = true; };
   }, [currentDate]);
+
+  useEffect(() => {
+  // Force icons visible with JavaScript
+  const interval = setInterval(() => {
+    const buttons = document.querySelectorAll('.calendar-root aside button svg');
+    buttons.forEach(svg => {
+      svg.style.stroke = '#ffffff';
+      svg.style.fill = 'none';
+      svg.style.display = 'block';
+      svg.style.opacity = '1';
+      svg.style.visibility = 'visible';
+      
+      // Force paths too
+      const paths = svg.querySelectorAll('path');
+      paths.forEach(path => {
+        path.style.stroke = '#ffffff';
+        path.style.strokeWidth = '2px';
+        path.style.fill = 'none';
+        path.style.opacity = '1';
+        path.style.visibility = 'visible';
+      });
+    });
+  }, 100);
+  
+  return () => clearInterval(interval);
+}, []);
 
   const getDaysInMonth = (date) => {
     const year = date.getFullYear();
@@ -1122,25 +1150,23 @@ export default function CalendarPage() {
                                   )}
                                 </div>
                               </div>
-                              <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity duration-200">
-                                <Button
-                                  size="icon"
-                                  variant="ghost"
+                              <div className="flex gap-1" style={{ position: 'relative', zIndex: 10 }}>
+                                <button
                                   onClick={(e) => handleEventClick(e, ev)}
-                                  className="h-7 w-7 hover:bg-blue-100 hover:text-blue-700 rounded-md"
+                                  className="h-7 w-7 hover:bg-blue-100 rounded-md flex items-center justify-center"
+                                  style={{ border: '1px solid #e2e8f0' }}
                                   aria-label={`Edit ${ev.title}`}
                                 >
-                                  <Edit3 className="w-3.5 h-3.5" />
-                                </Button>
-                                <Button
-                                  size="icon"
-                                  variant="ghost"
-                                  onClick={() => handleDeleteEvent(ev)}
-                                  className="h-7 w-7 hover:bg-red-100 hover:text-red-700 rounded-md"
+                                  <Edit3 style={{ width: 14, height: 14, stroke: '#3b82f6', strokeWidth: 2, fill: 'none' }} />
+                                </button>
+                                <button
+                                  onClick={(e) => { e.stopPropagation(); handleDeleteEvent(ev); }}
+                                  className="h-7 w-7 hover:bg-red-100 rounded-md flex items-center justify-center"
+                                  style={{ border: '1px solid #e2e8f0' }}
                                   aria-label={`Delete ${ev.title}`}
                                 >
-                                  <Trash2 className="w-3.5 h-3.5" />
-                                </Button>
+                                  <Trash2 style={{ width: 14, height: 14, stroke: '#ef4444', strokeWidth: 2, fill: 'none' }} />
+                                </button>
                               </div>
                             </div>
                           </div>
@@ -1337,20 +1363,11 @@ export default function CalendarPage() {
            and any absolutely positioned children are positioned relative to them.
            This prevents portal/absolute elements from appearing at the page origin
            (top-left). Keep rules tightly scoped to calendar-root only. */
-        .calendar-root aside { position: relative !important; }
-        .calendar-root aside .cozy { position: relative !important; display: block !important; }
-        .calendar-root aside .p-4, .calendar-root aside .px-4, .calendar-root aside .py-4 {
-          padding: 1rem !important; /* restore expected padding explicitly */
-        }
-        /* Reset inadvertent absolute/transformed children inside aside */
-        .calendar-root aside * {
-          position: static !important;
-          transform: none !important;
-          inset: auto !important;
-          left: auto !important;
-          top: auto !important;
-          right: auto !important;
-        }
+        .calendar-root aside { position: relative }
+        .calendar-root aside > .cozy {
+            position: relative;
+            display: block;
+            }
         
         @keyframes fadeIn { 
           from { opacity: 0; transform: translateY(6px); } 
@@ -1396,7 +1413,79 @@ export default function CalendarPage() {
         .hide-scrollbar::-webkit-scrollbar { display: none; }
         .hide-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
         /* Ensure svgs in header/nav inherit visible color */
-        .calendar-root header svg, .calendar-root .text-slate-700 svg { color: inherit !important; stroke: currentColor !important; fill: none !important; }
+        /* Ensure svgs in header/nav inherit visible color */
+
+        .calendar-root header svg, .calendar-root .text-slate-700 svg { 
+          color: inherit !important; 
+          stroke: currentColor !important; 
+          fill: none !important; 
+        }
+
+        /* NUCLEAR FIX for aside buttons */
+        .calendar-root aside button {
+          color: #64748b !important;
+          opacity: 1 !important;
+          visibility: visible !important;
+        }
+
+        /* Force visible stroke colors for light background */
+        .calendar-root aside button svg path {
+          stroke: #64748b !important;
+        }
+
+        .calendar-root aside button:hover svg path {
+          stroke: currentColor !important;
+        }
+
+        /* Colored icons */
+        .calendar-root aside .event-edit-btn:hover svg path {
+          stroke: #3b82f6 !important;
+        }
+
+        .calendar-root aside .event-delete-btn:hover svg path {
+          stroke: #ef4444 !important;
+        }
+
+        .calendar-root aside button:hover {
+          color: #1e40af !important;
+          background-color: #dbeafe !important;
+        }
+
+        .calendar-root aside button svg {
+          stroke: #64748b !important;
+          stroke-width: 2 !important;
+          fill: none !important;
+          opacity: 1 !important;
+          display: block !important;
+          visibility: visible !important;
+          width: 14px !important;
+          height: 14px !important;
+        }
+
+        .calendar-root aside button:hover svg {
+          stroke: #1e40af !important;
+        }
+
+        .calendar-root aside button svg[aria-hidden="true"] {
+          display: block !important;
+          visibility: visible !important;
+        }
+
+        .calendar-root aside button svg path {
+          stroke: inherit !important;
+          fill: none !important;
+          opacity: 1 !important;
+          display: block !important;
+          visibility: visible !important;
+        }
+
+        /* Force button container visible */
+        .calendar-root .group > div:last-child {
+          opacity: 1 !important;
+        }
+
+        
+
       `}</style>
       {toast && (
         <div className="fixed bottom-6 right-6 z-50 max-w-sm w-full rounded-lg shadow-lg" role="status" aria-live="polite">

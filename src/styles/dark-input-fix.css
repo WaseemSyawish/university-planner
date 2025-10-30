@@ -1,0 +1,104 @@
+/* Dark mode input fixes: ensure input/textarea/select text is readable in dark mode */
+:root {
+  --up-input-bg: #ffffff;
+  --up-input-text: #111827;
+  --up-input-placeholder: #6b7280;
+  --up-input-border: #d1d5db;
+}
+html.dark {
+  --up-input-bg: #0f172a; /* dark input background */
+  --up-input-text: #e6eef8; /* light input text */
+  --up-input-placeholder: rgba(230, 238, 248, 0.65);
+  --up-input-border: #334155;
+}
+
+/* Apply to common input elements and common app input classes */
+html.dark input,
+html.dark textarea,
+html.dark select,
+html.dark .cozy-input,
+html.dark input[type="date"],
+html.dark input[type="time"],
+html.dark input[type="number"] {
+  color: var(--up-input-text);
+  background-color: var(--up-input-bg);
+  border-color: var(--up-input-border);
+}
+
+/* Force webkit text fill for date/time controls (overrides utility classes) */
+html.dark input[type="date"],
+html.dark input[type="time"],
+html.dark input[type="date"]::-webkit-datetime-edit,
+html.dark input[type="date"]::-webkit-datetime-edit-text,
+html.dark input[type="date"]::-webkit-datetime-edit-month-field,
+html.dark input[type="date"]::-webkit-datetime-edit-day-field,
+html.dark input[type="date"]::-webkit-datetime-edit-year-field,
+html.dark input[type="time"]::-webkit-datetime-edit-hour-field,
+html.dark input[type="time"]::-webkit-datetime-edit-minute-field,
+html.dark input[type="time"]::-webkit-datetime-edit-ampm-field {
+  color: var(--up-input-text) !important;
+  -webkit-text-fill-color: var(--up-input-text) !important;
+}
+
+/* Placeholder styling */
+html.dark input::placeholder,
+html.dark textarea::placeholder {
+  color: var(--up-input-placeholder);
+  opacity: 1;
+}
+
+/* Webkit autofill fix */
+html.dark input:-webkit-autofill,
+html.dark textarea:-webkit-autofill {
+  -webkit-text-fill-color: var(--up-input-text) !important;
+  box-shadow: 0 0 0px 1000px var(--up-input-bg) inset !important;
+}
+
+/* Ensure the calendar picker indicator is visible in dark mode */
+html.dark input[type="date"]::-webkit-calendar-picker-indicator {
+  filter: invert(1) !important;
+}
+
+/* Ensure selects show selected text */
+html.dark select {
+  color: var(--up-input-text) !important;
+  background-color: var(--up-input-bg) !important;
+}
+
+/* Force option colors and override utility classes that set black text in dark mode */
+html.dark select option {
+  color: var(--up-input-text) !important;
+  background-color: var(--up-input-bg) !important;
+}
+
+/* If a utility class forced text-black on form controls, override it in dark mode for inputs/selects/textareas */
+html.dark input.text-black,
+html.dark textarea.text-black,
+html.dark select.text-black,
+html.dark .w-full.text-black {
+  color: var(--up-input-text) !important;
+  -webkit-text-fill-color: var(--up-input-text) !important;
+}
+
+/* MS Edge / IE dropdown arrow visibility */
+html.dark select::-ms-expand {
+  filter: invert(1) !important;
+}
+
+/* Respect disabled/readonly states but keep text visible */
+html.dark input[disabled],
+html.dark textarea[disabled],
+html.dark select[disabled],
+html.dark input[readonly],
+html.dark textarea[readonly],
+html.dark select[readonly] {
+  color: rgba(230, 238, 248, 0.65);
+  background-color: rgba(255, 255, 255, 0.02);
+  border-color: var(--up-input-border);
+}
+
+/* Keep caret visible */
+html.dark input,
+html.dark textarea {
+  caret-color: var(--up-input-text);
+}

@@ -1,4 +1,5 @@
 import React from 'react';
+import { parseDatePreserveLocal, buildLocalDateFromParts } from '../lib/dateHelpers';
 
 function formatLocalIso(dt) {
 	const y = dt.getFullYear();
@@ -9,7 +10,7 @@ function formatLocalIso(dt) {
 
 function getWeekDays(date = new Date()) {
 	// If date is an ISO string like '2025-09-24', make a Date at local midnight
-	const start = typeof date === 'string' ? new Date(date + 'T00:00:00') : new Date(date);
+	const start = typeof date === 'string' ? (buildLocalDateFromParts(date) || new Date(date + 'T00:00:00')) : new Date(date);
 	// If start is invalid, fallback to today
 	if (isNaN(start.getTime())) {
 		const now = new Date();
@@ -32,8 +33,8 @@ export default function WeekStrip({ events = [], selectedDay = '', onSelectDay =
 	const days = getWeekDays(startDay || new Date());
 	const byDay = (events || []).reduce((acc, ev) => {
 			try {
-				const dt = new Date(ev.date);
-				if (!isNaN(dt.getTime())) {
+				const dt = parseDatePreserveLocal(ev.date) || (ev.date ? buildLocalDateFromParts(String(ev.date).slice(0,10)) : null);
+				if (dt && !isNaN(dt.getTime())) {
 					const d = formatLocalIso(dt);
 					acc[d] = (acc[d] || 0) + 1;
 				}

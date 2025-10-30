@@ -21,7 +21,7 @@ export default async function handler(req, res) {
     if (req.method === 'GET') {
       const tpl = await prisma.eventTemplate.findUnique({ where: { id } });
       if (!tpl || tpl.user_id !== userId) return res.status(404).json({ error: 'Template not found' });
-      return res.status(200).json({ id: tpl.id, title: tpl.title, payload: tpl.payload, courseId: tpl.course_id, repeatOption: tpl.repeat_option, startDate: tpl.start_date ? tpl.start_date.toISOString().slice(0,10) : null });
+  return res.status(200).json({ id: tpl.id, title: tpl.title, payload: tpl.payload, courseId: tpl.course_id, repeatOption: tpl.repeat_option, startDate: tpl.start_date ? `${tpl.start_date.getFullYear()}-${String(tpl.start_date.getMonth()+1).padStart(2,'0')}-${String(tpl.start_date.getDate()).padStart(2,'0')}` : null });
     }
 
     if (req.method === 'PUT') {

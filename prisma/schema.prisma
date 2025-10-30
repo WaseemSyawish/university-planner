@@ -19,6 +19,7 @@ model User {
   archived_events     ArchivedEvent[]
   attendance_sessions AttendanceSession[]
   courses             Course[]
+  assessments         Assessment[]
   events              Event[]
 
   @@map("users")
@@ -40,6 +41,7 @@ model Course {
   attendance_sessions AttendanceSession[]
   users               User                @relation(fields: [user_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
   events              Event[]
+  assessments         Assessment[]
 
   @@map("courses")
 }
@@ -122,6 +124,24 @@ model Attachment {
   event      Event     @relation(fields: [event_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
 
   @@map("attachments")
+}
+
+model Assessment {
+  id         String    @id @default(uuid())
+  name       String
+  weight     Float?
+  // items is a JSON blob that mirrors the client-side structure: [{ name, grade, maxGrade, weight? }, ...]
+  items      Json?
+  course_id  String
+  user_id    String
+  created_at DateTime? @default(now())
+  updated_at DateTime? @default(now())
+
+  course Course @relation(fields: [course_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  user   User   @relation(fields: [user_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@index([user_id, course_id], map: "idx_assessments_user_course")
+  @@map("assessments")
 }
 
 enum attendance_status {

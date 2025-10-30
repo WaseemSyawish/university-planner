@@ -1,10 +1,11 @@
 import React, { useState } from 'react';
 import { useCalendar } from './CalendarProvider';
+import { parseDatePreserveLocal, buildLocalDateFromParts, toYMDLocal } from '../../lib/dateHelpers';
 
 export default function AddEventDialog({ defaultDate }) {
   const { addEvent, updateEvent } = useCalendar();
   const [title, setTitle] = useState('');
-  const [date, setDate] = useState(defaultDate ? new Date(defaultDate) : new Date());
+  const [date, setDate] = useState(defaultDate ? (parseDatePreserveLocal(defaultDate) || buildLocalDateFromParts(String(defaultDate).slice(0,10))) : new Date());
   const [time, setTime] = useState('09:00');
   const [color, setColor] = useState('blue');
 
@@ -67,7 +68,7 @@ export default function AddEventDialog({ defaultDate }) {
       </div>
       <div>
         <label className="block text-xs">Date</label>
-        <input type="date" value={date.toISOString().slice(0,10)} onChange={(e)=>setDate(new Date(e.target.value))} className="border px-2 py-1" />
+  <input type="date" value={toYMDLocal(date)} onChange={(e)=>setDate(buildLocalDateFromParts(e.target.value))} className="border px-2 py-1" />
       </div>
       <div>
         <label className="block text-xs">Time</label>

@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Clock, TrendingUp, Plus, BookOpen, X, Check, Star, Zap, Target } from 'lucide-react';
-import { buildLocalDateFromParts, formatTimeFromParts } from './lib/dateHelpers';
+import { buildLocalDateFromParts, formatTimeFromParts, parseDatePreserveLocal } from './lib/dateHelpers';
 
 const UniversityPlanner = () => {
   const [events, setEvents] = useState([]);
@@ -72,7 +72,7 @@ const UniversityPlanner = () => {
     return events.filter(event => {
       let eventDateObj = null;
       if (event && event.time) eventDateObj = buildLocalDateFromParts(event.date, event.time);
-      else eventDateObj = event && event.date ? new Date(event.date) : null;
+      else if (event && event.date) eventDateObj = parseDatePreserveLocal(event.date) || buildLocalDateFromParts(event.date);
       if (!eventDateObj) return false;
       return eventDateObj.toDateString() === date.toDateString();
     });
@@ -659,8 +659,10 @@ const UniversityPlanner = () => {
                           {weekDates.map((date, dayIndex) => {
                             const isToday = date.toDateString() === new Date().toDateString();
                             const dayEvents = getEventsForDate(date).filter(event => {
-                              const eventHour = new Date(event.date).getHours();
-                              return eventHour === hour;
+                              try {
+                                const evtDt = event && event.time ? buildLocalDateFromParts(event.date, event.time) : (parseDatePreserveLocal(event.date) || buildLocalDateFromParts(event.date));
+                                return evtDt ? evtDt.getHours() === hour : false;
+                              } catch (e) { return false; }
                             });
                             
                             return (

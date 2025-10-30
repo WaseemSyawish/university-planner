@@ -58,3 +58,13 @@ export function formatTimeFromParts(datePart, timePart) {
   if (!dt) return '';
   try { return dt.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }); } catch (e) { return '';} 
 }
+
+// Return YYYY-MM-DD for a Date-like input using local date components.
+export function toYMDLocal(input) {
+  const dt = parseDatePreserveLocal(input) || (input instanceof Date ? input : (input ? new Date(input) : null));
+  if (!dt || isNaN(dt.getTime())) return '';
+  const y = dt.getFullYear();
+  const m = String(dt.getMonth() + 1).padStart(2, '0');
+  const d = String(dt.getDate()).padStart(2, '0');
+  return `${y}-${m}-${d}`;
+}

@@ -1,14 +1,13 @@
 import React, { useState, useEffect } from 'react';
 import Head from 'next/head';
+import { parseDatePreserveLocal, buildLocalDateFromParts, toYMDLocal } from '../src/lib/dateHelpers';
 import { Calendar, BookOpen, TrendingUp, Clock, CheckCircle, AlertCircle, GraduationCap, Users, Plus } from 'lucide-react';
 import CalendarHeader from '../src/components/CalendarHeader.jsx';
 
-// Small presentational StatCard with light/dark mode support
-function StatCard({ icon, label, value, loading, accent = 'purple', smallIconClass = '' }) {
-  const bg = smallIconClass || {
+function StatCard({ icon, label, value, loading, accent = 'purple' }) {
+  const bg = {
     purple: 'bg-purple-50 dark:bg-purple-900/30',
     blue: 'bg-blue-50 dark:bg-blue-900/30',
-    orange: 'bg-orange-50 dark:bg-orange-900/30',
     green: 'bg-green-50 dark:bg-green-900/30'
   }[accent] || 'bg-gray-50 dark:bg-gray-700';
   
@@ -38,18 +37,18 @@ export default function UniversityOverview() {
   const [userName, setUserName] = useState('');
   const [isLoadingUser, setIsLoadingUser] = useState(true);
 
-  // State-backed data
   const [todayClasses, setTodayClasses] = useState([]);
   const [upcomingDeadlines, setUpcomingDeadlines] = useState([]);
   const [isLoadingClasses, setIsLoadingClasses] = useState(true);
   const [isLoadingDeadlines, setIsLoadingDeadlines] = useState(true);
 
-  // Auxiliary data caches
   const [courses, setCourses] = useState([]);
-  const [quickStats, setQuickStats] = useState({ gpa: null, credits: null, dueThisWeek: null, attendanceRate: null });
+  const [quickStats, setQuickStats] = useState({ gpa: null, credits: null, attendanceRate: null });
   const [isLoadingQuickStats, setIsLoadingQuickStats] = useState(true);
 
-  // This-week metrics
+  const [nextClassAlert, setNextClassAlert] = useState(null);
+  const [completedDeadlines, setCompletedDeadlines] = useState(new Set());
+
   const [weekClassesCount, setWeekClassesCount] = useState(0);
   const [assignmentsDueCount, setAssignmentsDueCount] = useState(0);
   const [studyHoursLogged, setStudyHoursLogged] = useState(0);
@@ -76,9 +75,8 @@ export default function UniversityOverview() {
 
     (async () => {
       try {
-        // Basic data: user and courses
+        setIsLoadingUser(true);
         try {
-          setIsLoadingUser(true);
           async function fetchMe() {
             let res = await safeFetchJson('/api/auth/me');
             if (!res && typeof window !== 'undefined') {
@@ -101,7 +99,6 @@ export default function UniversityOverview() {
         const coursesBody = await safeFetchJson('/api/courses');
         if (mounted && coursesBody && Array.isArray(coursesBody.courses)) setCourses(coursesBody.courses);
 
-        // TIMETABLE + FALLBACK
         setIsLoadingClasses(true);
         try {
           async function tryFetchTimetable(path) {
@@ -146,14 +143,7 @@ export default function UniversityOverview() {
             } catch (e) { return false; }
           };
           const toLocalYmd = (v) => {
-            try {
-              const dt = new Date(String(v));
-              if (isNaN(dt.getTime())) return null;
-              const y = dt.getFullYear();
-              const m = String(dt.getMonth() + 1).padStart(2, '0');
-              const d = String(dt.getDate()).padStart(2, '0');
-              return `${y}-${m}-${d}`;
-            } catch (e) { return null; }
+            try { const r = toYMDLocal(v); return r || null; } catch (e) { return null; }
           };
           const todayYmd = toLocalYmd(currentDate);
           if (Array.isArray(classesSrc) && classesSrc.length) {
@@ -178,12 +168,12 @@ export default function UniversityOverview() {
                 })() : '';
 
                 if (c.date && !c.repeat && c.repeatOption !== 'weekly' && c.dayOfWeek == null) {
-                  const d = (typeof c.date === 'string' && c.date.length >= 10) ? c.date.slice(0,10) : (new Date(c.date)).toISOString().slice(0,10);
+                  const dYmd = (typeof c.date === 'string' && c.date.length >= 10) ? c.date.slice(0,10) : toYMDLocal(c.date);
                   try {
-                    const dd = new Date(d);
+                    const dd = buildLocalDateFromParts(dYmd);
                     const ddY = toLocalYmd(dd);
-                    if (ddY && todayYmd && ddY === todayYmd && isLectureItem(c)) todayList.push({ id: c.id || `tt-${d}`, code: c.code || c.module || (c.subject||'').split(' ')[0] || 'TBA', name: c.title || c.subject || c.module || 'Lecture', time: start ? `${start} - ${end}` : '', instructor: c.instructor || c.lecturer || '', location: c.location || '' });
-                    if (!isNaN(dd.getTime())) {
+                    if (ddY && todayYmd && ddY === todayYmd && isLectureItem(c)) todayList.push({ id: c.id || `tt-${dYmd}`, code: c.code || c.module || (c.subject||'').split(' ')[0] || 'TBA', name: c.title || c.subject || c.module || 'Lecture', time: start ? `${start} - ${end}` : '', instructor: c.instructor || c.lecturer || '', location: c.location || '' });
+                    if (dd && !isNaN(dd.getTime())) {
                       const ddMid = new Date(dd.getFullYear(), dd.getMonth(), dd.getDate());
                       if (ddMid >= startWeek && ddMid <= endWeek && isLectureItem(c)) weekCount++;
                     }
@@ -199,12 +189,12 @@ export default function UniversityOverview() {
                 }
 
                 if (c.date) {
-                  const d = (typeof c.date === 'string' && c.date.length >= 10) ? c.date.slice(0,10) : (new Date(c.date)).toISOString().slice(0,10);
+                  const dYmd = (typeof c.date === 'string' && c.date.length >= 10) ? c.date.slice(0,10) : toYMDLocal(c.date);
                   try {
-                    const dd = new Date(d);
+                    const dd = buildLocalDateFromParts(dYmd);
                     const ddY = toLocalYmd(dd);
-                    if (ddY && todayYmd && ddY === todayYmd && isLectureItem(c)) todayList.push({ id: c.id || `tt-${d}`, code: c.code || c.module || (c.subject||'').split(' ')[0] || 'TBA', name: c.title || c.subject || c.module || 'Lecture', time: start ? `${start} - ${end}` : '', instructor: c.instructor || c.lecturer || '', location: c.location || '' });
-                    if (!isNaN(dd.getTime())) {
+                    if (ddY && todayYmd && ddY === todayYmd && isLectureItem(c)) todayList.push({ id: c.id || `tt-${dYmd}`, code: c.code || c.module || (c.subject||'').split(' ')[0] || 'TBA', name: c.title || c.subject || c.module || 'Lecture', time: start ? `${start} - ${end}` : '', instructor: c.instructor || c.lecturer || '', location: c.location || '' });
+                    if (dd && !isNaN(dd.getTime())) {
                       const ddMid = new Date(dd.getFullYear(), dd.getMonth(), dd.getDate());
                       if (ddMid >= startWeek && ddMid <= endWeek && isLectureItem(c)) weekCount++;
                     }
@@ -221,7 +211,7 @@ export default function UniversityOverview() {
                   if (t !== 'lecture') return false;
                   if (!e.date) return false;
                   try {
-                    const ed = new Date(e.date);
+                    const ed = parseDatePreserveLocal(e.date) || buildLocalDateFromParts(String(e.date).slice(0,10));
                     const edY = toLocalYmd(ed);
                     return edY && todayYmd && edY === todayYmd;
                   } catch (er) { return false; }
@@ -242,8 +232,8 @@ export default function UniversityOverview() {
                   endWeek.setDate(startWeek.getDate() + 6);
                   weekCount = evs.events.reduce((cnt, ev) => {
                     if (!ev.date) return cnt;
-                    const d = new Date(ev.date);
-                    if (isNaN(d.getTime())) return cnt;
+                    const d = parseDatePreserveLocal(ev.date) || buildLocalDateFromParts(String(ev.date).slice(0,10));
+                    if (!d || isNaN(d.getTime())) return cnt;
                     const dMid = new Date(d.getFullYear(), d.getMonth(), d.getDate());
                     const t = (ev && (ev.type || (ev.raw && ev.raw.type) || '')).toString().toLowerCase();
                     return (dMid >= startWeek && dMid <= endWeek && t === 'lecture') ? cnt + 1 : cnt;
@@ -254,9 +244,45 @@ export default function UniversityOverview() {
           }
 
           if (mounted) {
-            const finalToday = (todayList || []).slice(0,6);
+            // Sort today's classes by start time (earliest first). If no valid time,
+            // push those entries to the end.
+            const parseStartMinutes = (t) => {
+              try {
+                if (!t) return Number.MAX_SAFE_INTEGER;
+                const m = String(t).match(/^(\d{1,2}):(\d{2})/);
+                if (!m) return Number.MAX_SAFE_INTEGER;
+                const hh = parseInt(m[1], 10);
+                const mm = parseInt(m[2], 10);
+                if (Number.isNaN(hh) || Number.isNaN(mm)) return Number.MAX_SAFE_INTEGER;
+                return hh * 60 + mm;
+              } catch (e) { return Number.MAX_SAFE_INTEGER; }
+            };
+
+            (todayList || []).sort((a, b) => parseStartMinutes(a.time) - parseStartMinutes(b.time));
+
+            const finalToday = (todayList || []).slice(0, 6);
             setTodayClasses(finalToday);
             setWeekClassesCount(weekCount || 0);
+
+            const now = new Date();
+            const oneHourFromNow = new Date(now.getTime() + 60 * 60 * 1000);
+            let alertClass = null;
+            for (const cls of finalToday) {
+              if (!cls.time) continue;
+              const timeMatch = cls.time.match(/^(\d{1,2}):(\d{2})/);
+              if (!timeMatch) continue;
+              
+              const [_, hours, minutes] = timeMatch;
+              const classTime = new Date(now);
+              classTime.setHours(parseInt(hours), parseInt(minutes), 0, 0);
+              
+              if (classTime > now && classTime <= oneHourFromNow) {
+                const minsUntil = Math.round((classTime - now) / 60000);
+                alertClass = { ...cls, minutesUntil: minsUntil };
+                break;
+              }
+            }
+            setNextClassAlert(alertClass);
 
             try {
               const toLocalMidnight = (d) => {
@@ -301,7 +327,6 @@ export default function UniversityOverview() {
           }
         } finally { setIsLoadingClasses(false); }
 
-        // DEADLINES
         setIsLoadingDeadlines(true);
         try {
           const eventsPayload = await safeFetchJson('/api/events');
@@ -309,10 +334,10 @@ export default function UniversityOverview() {
             const deadlines = eventsPayload.events.filter(e => e.type === 'deadline' || e.type === 'assignment').slice(0,8).map((e, i) => ({
               id: e.id || `ev-${i}`,
               title: `${e.course ? e.course + ' - ' : ''}${e.title || e.name}`,
-              dueDate: e.date ? (new Date(e.date)).toLocaleDateString(undefined, { month: 'short', day: 'numeric' }) : '',
+              dueDate: e.date ? (parseDatePreserveLocal(e.date) || buildLocalDateFromParts(String(e.date).slice(0,10)) || new Date(String(e.date))).toLocaleDateString(undefined, { month: 'short', day: 'numeric' }) : '',
               type: e.type || 'assignment',
               course: e.course || '',
-              daysLeft: e.date ? Math.max(0, Math.ceil((new Date(e.date) - new Date()) / (1000*60*60*24))) : 0
+              daysLeft: e.date ? Math.max(0, Math.ceil(((parseDatePreserveLocal(e.date) || buildLocalDateFromParts(String(e.date).slice(0,10)) || new Date(String(e.date))).getTime() - new Date().getTime()) / (1000*60*60*24))) : 0
             }));
             if (mounted) {
               setUpcomingDeadlines(deadlines);
@@ -321,25 +346,10 @@ export default function UniversityOverview() {
           }
         } finally { setIsLoadingDeadlines(false); }
 
-        // QUICK STATS
         setIsLoadingQuickStats(true);
         try {
           const courseList = Array.isArray(coursesBody?.courses) ? coursesBody.courses : (Array.isArray(courses) ? courses : []);
           const creditsSum = courseList.reduce((s, c) => s + (Number(c.credits || c.credit || 0)), 0);
-
-          const eventsForStats = await safeFetchJson('/api/events') || { events: [] };
-          let dueCount = 0;
-          if (eventsForStats && Array.isArray(eventsForStats.events)) {
-            const now = new Date();
-            const weekAhead = new Date();
-            weekAhead.setDate(now.getDate() + 7);
-            dueCount = eventsForStats.events.reduce((cnt, e) => {
-              if (!e.date) return cnt;
-              const d = new Date(e.date);
-              if (isNaN(d.getTime())) return cnt;
-              return (d >= now && d <= weekAhead) ? cnt + 1 : cnt;
-            }, 0);
-          }
 
           const gradesForStats = await safeFetchJson('/api/grades') || { data: [] };
           let avgPercentage = null;
@@ -388,7 +398,7 @@ export default function UniversityOverview() {
             }
           } catch (e) {}
 
-          if (mounted) setQuickStats({ gpa, credits: creditsSum, dueThisWeek: dueCount, attendanceRate });
+          if (mounted) setQuickStats({ gpa, credits: creditsSum, attendanceRate });
         } finally { setIsLoadingQuickStats(false); }
 
       } catch (e) {}
@@ -409,13 +419,41 @@ export default function UniversityOverview() {
       <CalendarHeader userName={userName} />
 
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-        {/* Welcome Section */}
         <div className="mb-8">
           <h2 className="text-4xl font-bold text-gray-900 dark:text-gray-100 mb-2">
             Good morning, {isLoadingUser ? <Skeleton width="w-32" height="h-9" /> : (userName || 'Student')}
           </h2>
           <p className="text-gray-600 dark:text-gray-400">Here's what's happening with your studies today</p>
         </div>
+
+        {nextClassAlert && (
+          <div className="mb-6 bg-gradient-to-r from-amber-50 to-orange-50 dark:from-amber-900/20 dark:to-orange-900/20 border-2 border-amber-300 dark:border-amber-700 rounded-xl p-4 shadow-sm">
+            <div className="flex items-center gap-4">
+              <div className="w-12 h-12 bg-amber-100 dark:bg-amber-900/50 rounded-lg flex items-center justify-center flex-shrink-0">
+                <Clock className="w-6 h-6 text-amber-600 dark:text-amber-400 animate-pulse" />
+              </div>
+              <div className="flex-1">
+                <div className="flex items-center gap-2 mb-1">
+                  <span className="text-sm font-bold text-amber-900 dark:text-amber-100">Next Class Starting Soon</span>
+                  <span className="px-2 py-0.5 bg-amber-200 dark:bg-amber-800 text-amber-900 dark:text-amber-100 rounded-full text-xs font-bold">
+                    {nextClassAlert.minutesUntil} min{nextClassAlert.minutesUntil !== 1 ? 's' : ''}
+                  </span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <span className="text-sm font-semibold text-amber-800 dark:text-amber-200">{nextClassAlert.code}</span>
+                  <span className="text-sm text-amber-700 dark:text-amber-300">•</span>
+                  <span className="text-sm text-amber-700 dark:text-amber-300">{nextClassAlert.name}</span>
+                  {nextClassAlert.location && (
+                    <>
+                      <span className="text-sm text-amber-700 dark:text-amber-300">•</span>
+                      <span className="text-sm text-amber-700 dark:text-amber-300">{nextClassAlert.location}</span>
+                    </>
+                  )}
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
 
         <div className="flex items-center justify-between mb-4">
           <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100">Overview</h3>
@@ -426,8 +464,7 @@ export default function UniversityOverview() {
           </div>
         </div>
 
-        {/* Quick Stats */}
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
           <StatCard
             icon={<TrendingUp className="w-6 h-6 text-purple-600 dark:text-purple-400" />}
             label="Current GPA"
@@ -443,13 +480,6 @@ export default function UniversityOverview() {
             accent="blue"
           />
           <StatCard
-            icon={<AlertCircle className="w-6 h-6 text-orange-600 dark:text-orange-400" />}
-            label="Due This Week"
-            value={quickStats.dueThisWeek !== null ? quickStats.dueThisWeek : '0'}
-            loading={isLoadingQuickStats}
-            accent="orange"
-          />
-          <StatCard
             icon={<Users className="w-6 h-6 text-green-600 dark:text-green-400" />}
             label="Attendance Rate"
             value={quickStats.attendanceRate !== null ? `${quickStats.attendanceRate}%` : '—'}
@@ -458,11 +488,8 @@ export default function UniversityOverview() {
           />
         </div>
 
-        {/* Main Grid */}
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-          {/* Left Column */}
           <div className="lg:col-span-2 space-y-6">
-            {/* Today's Classes */}
             <div className="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-100 dark:border-gray-700 overflow-hidden">
               <div className="bg-gradient-to-r from-purple-600 to-purple-700 dark:from-purple-700 dark:to-purple-800 px-6 py-4">
                 <div className="flex items-center justify-between">
@@ -489,7 +516,7 @@ export default function UniversityOverview() {
                 ) : todayClasses.length > 0 ? (
                   <div className="space-y-3">
                     {todayClasses.map((cls) => {
-                      const ymd = cls.date || cls.dateStr || currentDate.toISOString().slice(0,10);
+                      const ymd = cls.date || cls.dateStr || toYMDLocal(currentDate);
                       const goto = () => { window.location.href = `/calendar?date=${encodeURIComponent(String(ymd).slice(0,10))}`; };
                       return (
                         <div key={cls.id} tabIndex={0} role="button" onClick={goto} onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') goto(); }} className="group bg-gray-50 dark:bg-gray-700/50 rounded-lg p-4 hover:bg-purple-50 dark:hover:bg-purple-900/20 transition-all duration-200 border border-transparent hover:border-purple-200 dark:hover:border-purple-800 cursor-pointer focus:outline-none focus:ring-2 focus:ring-purple-300 dark:focus:ring-purple-700">
@@ -566,7 +593,6 @@ export default function UniversityOverview() {
               </div>
             </div>
 
-            {/* Upcoming Deadlines */}
             <div className="bg-white dark:bg-gray-800 rounded-xl p-6 shadow-sm border border-gray-100 dark:border-gray-700">
               <div className="flex items-center justify-between mb-6">
                 <h3 className="text-xl font-bold text-gray-900 dark:text-gray-100">Upcoming Deadlines</h3>
@@ -591,32 +617,77 @@ export default function UniversityOverview() {
                 </div>
               ) : upcomingDeadlines.length > 0 ? (
                 <div className="space-y-3">
-                  {upcomingDeadlines.map((deadline) => (
-                    <div key={deadline.id} className="flex items-center justify-between p-4 border border-gray-200 dark:border-gray-700 rounded-lg hover:border-purple-300 dark:hover:border-purple-700 transition-colors">
-                      <div className="flex items-start gap-3">
-                        <div className={`w-10 h-10 rounded-lg flex items-center justify-center flex-shrink-0 ${
-                          deadline.type === 'exam' ? 'bg-red-100 dark:bg-red-900/30' : 'bg-blue-100 dark:bg-blue-900/30'
-                        }`}>
-                          {deadline.type === 'exam' ? (
-                            <AlertCircle className={`w-5 h-5 ${deadline.type === 'exam' ? 'text-red-600 dark:text-red-400' : 'text-blue-600 dark:text-blue-400'}`} />
-                          ) : (
-                            <CheckCircle className="w-5 h-5 text-blue-600 dark:text-blue-400" />
+                  {upcomingDeadlines.map((deadline) => {
+                    const isCompleted = completedDeadlines.has(deadline.id);
+                    const priority = deadline.daysLeft <= 2 ? 'HIGH' : deadline.daysLeft <= 5 ? 'MEDIUM' : 'LOW';
+                    const priorityColors = {
+                      HIGH: 'bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-400 border-red-200 dark:border-red-800',
+                      MEDIUM: 'bg-orange-100 dark:bg-orange-900/30 text-orange-700 dark:text-orange-400 border-orange-200 dark:border-orange-800',
+                      LOW: 'bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400 border-green-200 dark:border-green-800'
+                    };
+                    
+                    return (
+                      <div key={deadline.id} className={`flex items-center gap-3 p-4 border rounded-lg transition-all ${
+                        isCompleted 
+                          ? 'bg-gray-50 dark:bg-gray-800/50 border-gray-200 dark:border-gray-700 opacity-60' 
+                          : 'border-gray-200 dark:border-gray-700 hover:border-purple-300 dark:hover:border-purple-700'
+                      }`}>
+                        <input
+                          type="checkbox"
+                          checked={isCompleted}
+                          onChange={() => {
+                            setCompletedDeadlines(prev => {
+                              const next = new Set(prev);
+                              if (next.has(deadline.id)) {
+                                next.delete(deadline.id);
+                              } else {
+                                next.add(deadline.id);
+                              }
+                              return next;
+                            });
+                          }}
+                          className="w-5 h-5 rounded border-gray-300 dark:border-gray-600 text-purple-600 dark:text-purple-500 focus:ring-purple-500 dark:focus:ring-purple-600 cursor-pointer"
+                        />
+                        <div className="flex items-center justify-between flex-1">
+                          <div className="flex items-start gap-3">
+                            <div className={`w-10 h-10 rounded-lg flex items-center justify-center flex-shrink-0 ${
+                              deadline.type === 'exam' ? 'bg-red-100 dark:bg-red-900/30' : 'bg-blue-100 dark:bg-blue-900/30'
+                            }`}>
+                              {deadline.type === 'exam' ? (
+                                <AlertCircle className={`w-5 h-5 ${deadline.type === 'exam' ? 'text-red-600 dark:text-red-400' : 'text-blue-600 dark:text-blue-400'}`} />
+                              ) : (
+                                <CheckCircle className="w-5 h-5 text-blue-600 dark:text-blue-400" />
+                              )}
+                            </div>
+                            <div>
+                              <div className="flex items-center gap-2 mb-1">
+                                <p className={`font-medium ${isCompleted ? 'line-through text-gray-500 dark:text-gray-500' : 'text-gray-900 dark:text-gray-100'}`}>
+                                  {deadline.title}
+                                </p>
+                                {!isCompleted && (
+                                  <span className={`px-2 py-0.5 rounded text-xs font-bold border ${priorityColors[priority]}`}>
+                                    {priority}
+                                  </span>
+                                )}
+                              </div>
+                              <p className={`text-sm ${isCompleted ? 'text-gray-400 dark:text-gray-600' : 'text-gray-600 dark:text-gray-400'}`}>
+                                {deadline.dueDate}
+                              </p>
+                            </div>
+                          </div>
+                          {!isCompleted && (
+                            <div className={`px-3 py-1 rounded-full text-sm font-medium ${
+                              deadline.daysLeft <= 2 ? 'bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-400' : 
+                              deadline.daysLeft <= 5 ? 'bg-orange-100 dark:bg-orange-900/30 text-orange-700 dark:text-orange-400' : 
+                              'bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400'
+                            }`}>
+                              {deadline.daysLeft} days
+                            </div>
                           )}
                         </div>
-                        <div>
-                          <p className="font-medium text-gray-900 dark:text-gray-100 mb-1">{deadline.title}</p>
-                          <p className="text-sm text-gray-600 dark:text-gray-400">{deadline.dueDate}</p>
-                        </div>
                       </div>
-                      <div className={`px-3 py-1 rounded-full text-sm font-medium ${
-                        deadline.daysLeft <= 2 ? 'bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-400' : 
-                        deadline.daysLeft <= 5 ? 'bg-orange-100 dark:bg-orange-900/30 text-orange-700 dark:text-orange-400' : 
-                        'bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400'
-                      }`}>
-                        {deadline.daysLeft} days
-                      </div>
-                    </div>
-                  ))}
+                    );
+                  })}
                 </div>
               ) : (
                 <div className="text-center py-12">
@@ -634,26 +705,7 @@ export default function UniversityOverview() {
             </div>
           </div>
 
-          {/* Right Column */}
           <div className="space-y-6">
-            {/* Quick Actions */}
-            <div className="bg-white dark:bg-gray-800 rounded-xl p-6 shadow-sm border border-gray-100 dark:border-gray-700">
-              <h3 className="text-xl font-bold text-gray-900 dark:text-gray-100 mb-4">Quick Actions</h3>
-              <div className="space-y-3">
-                <button className="w-full bg-purple-600 dark:bg-purple-700 text-white py-3 rounded-lg font-medium hover:bg-purple-700 dark:hover:bg-purple-600 transition-colors flex items-center justify-center gap-2" onClick={() => window.location.href = '/calendar'}>
-                  <Calendar className="w-5 h-5" />
-                  Open Calendar
-                </button>
-                <button className="w-full bg-white dark:bg-gray-700 border-2 border-purple-600 dark:border-purple-500 text-purple-600 dark:text-purple-400 py-3 rounded-lg font-medium hover:bg-purple-50 dark:hover:bg-purple-900/20 transition-colors" onClick={() => window.location.href = '/calendar'}>
-                  Create Event
-                </button>
-                <button className="w-full bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 py-3 rounded-lg font-medium hover:bg-gray-50 dark:hover:bg-gray-600 transition-colors" onClick={() => window.location.href = '/modules'}>
-                  View Modules
-                </button>
-              </div>
-            </div>
-
-            {/* This Week Overview */}
             <div className="bg-white dark:bg-gray-800 rounded-xl p-6 shadow-sm border border-gray-100 dark:border-gray-700">
               <h3 className="text-xl font-bold text-gray-900 dark:text-gray-100 mb-4">This Week</h3>
               <div className="grid grid-cols-7 gap-2 mb-4">
@@ -690,7 +742,6 @@ export default function UniversityOverview() {
               </div>
             </div>
 
-            {/* Active Modules */}
             <div className="bg-white dark:bg-gray-800 rounded-xl p-6 shadow-sm border border-gray-100 dark:border-gray-700">
               <h3 className="text-xl font-bold text-gray-900 dark:text-gray-100 mb-4">Active Modules</h3>
               <div className="space-y-3">
