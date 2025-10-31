@@ -39,6 +39,9 @@ export default function AddEventDialog({ defaultDate }) {
         date: ev.startDate.slice(0,10),
         time: ev.startDate.split('T')[1].slice(0,5),
         endTime: ev.endDate.split('T')[1].slice(0,5),
+        // include client-computed ISO instants so server doesn't have to guess timezone
+        startDate: ev.startDate,
+        endDate: ev.endDate,
         type: 'event',
         description: ev.description || null,
         location: null
@@ -51,7 +54,15 @@ export default function AddEventDialog({ defaultDate }) {
         if (created && created.id) {
           // update provider-managed events via updateEvent exposed by CalendarProvider
           if (typeof updateEvent === 'function') {
-            updateEvent({ id: created.id, title: created.title || ev.title, startDate: created.date || payload.date, endDate: created.endTime || payload.endTime, color: ev.color, user: ev.user });
+            updateEvent({
+              id: created.id,
+              title: created.title || ev.title,
+              // prefer server-provided ISO instants, fallback to our optimistic ones
+              startDate: created.startDate || created.date || payload.startDate || ev.startDate,
+              endDate: created.endDate || created.endTime || payload.endDate || ev.endDate,
+              color: ev.color,
+              user: ev.user
+            });
           }
         }
       }

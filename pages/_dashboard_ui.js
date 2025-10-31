@@ -300,6 +300,23 @@ export default function UniversityPlanner({ initialEvents = [], initialCourses =
       const me = await fetch('/api/auth/me');
       const mj = me.ok ? await me.json() : null;
       const body = { ...payload, ...(mj && mj.authenticated ? { userId: mj.id } : {}) };
+      // If client didn't provide ISO instants, compute them from date/time using local constructor
+      try {
+        if (!body.startDate && body.date) {
+          const s = buildLocalDateFromParts(body.date, body.time);
+          if (s && !isNaN(s.getTime())) body.startDate = s.toISOString();
+        }
+        if (!body.endDate) {
+          if (body.date && body.endTime) {
+            const e = buildLocalDateFromParts(body.date, body.endTime);
+            if (e && !isNaN(e.getTime())) body.endDate = e.toISOString();
+          } else if (body.startDate) {
+            // default 30 minute duration
+            const st = new Date(body.startDate);
+            if (!isNaN(st.getTime())) body.endDate = new Date(st.getTime() + 30 * 60000).toISOString();
+          }
+        }
+      } catch (e) { /* safe fallback - leave body as-is */ }
       // In development, attach smoke_user if no auth resolved
       if (typeof process !== 'undefined' && process.env && process.env.NODE_ENV === 'development' && !body.userId) body.userId = 'smoke_user';
       const res = await fetch('/api/events', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
