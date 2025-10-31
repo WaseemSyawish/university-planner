@@ -605,6 +605,18 @@ export default function CalendarPage() {
           location: newEvent.location || null,
           description: newEvent.description || null
         };
+        // attach client-computed ISO instants so server doesn't have to guess timezone
+        try {
+          const s = buildLocalDateFromParts(newEvent.date, newEvent.startTime);
+          if (s && !isNaN(s.getTime())) body.startDate = s.toISOString();
+          if (newEvent.endTime) {
+            const e = buildLocalDateFromParts(newEvent.date, newEvent.endTime);
+            if (e && !isNaN(e.getTime())) body.endDate = e.toISOString();
+          } else if (body.startDate) {
+            const st = new Date(body.startDate);
+            if (!isNaN(st.getTime())) body.endDate = new Date(st.getTime() + 30 * 60000).toISOString();
+          }
+        } catch (e) { /* ignore and send body without instants */ }
         if (isDev) body.userId = 'smoke_user';
         const res = await fetch('/api/events', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
         if (!res.ok) throw new Error('create failed');
@@ -629,8 +641,11 @@ export default function CalendarPage() {
           id: String(created.id),
           title: created.title || body.title,
           date: created.date || body.date,
-          startTime: created.time || body.time || '',
-          endTime: created.endTime || '',
+          // prefer server-provided ISO instants when present
+          startDate: created.startDate || body.startDate || null,
+          endDate: created.endDate || body.endDate || null,
+          startTime: created.time || body.time || (created.startDate ? (created.startDate.split('T')[1] || '').slice(0,5) : ''),
+          endTime: created.endTime || (created.endDate ? (created.endDate.split('T')[1] || '').slice(0,5) : '') || '',
           type: created.type || body.type || 'event',
           location: created.location || '',
           description: created.description || '',
@@ -662,6 +677,18 @@ export default function CalendarPage() {
           location: newEvent.location || null,
           description: newEvent.description || null
         };
+        // attach client-computed ISO instants to update payload
+        try {
+          const s = buildLocalDateFromParts(newEvent.date, newEvent.startTime);
+          if (s && !isNaN(s.getTime())) payload.startDate = s.toISOString();
+          if (newEvent.endTime) {
+            const e = buildLocalDateFromParts(newEvent.date, newEvent.endTime);
+            if (e && !isNaN(e.getTime())) payload.endDate = e.toISOString();
+          } else if (payload.startDate) {
+            const st = new Date(payload.startDate);
+            if (!isNaN(st.getTime())) payload.endDate = new Date(st.getTime() + 30 * 60000).toISOString();
+          }
+        } catch (e) { /* ignore */ }
         const isDev = (typeof process !== 'undefined' && process.env && process.env.NODE_ENV === 'development');
         if (isDev) payload.userId = 'smoke_user';
 
@@ -692,7 +719,18 @@ export default function CalendarPage() {
         }
         const json = await res.json();
         const updated = json.event || json;
-        setEvents(prev => prev.map(ev => ev.id === id ? { ...ev, title: updated.title || ev.title, date: updated.date || ev.date, startTime: updated.time || ev.startTime, location: updated.location || ev.location, description: updated.description || ev.description } : ev));
+        setEvents(prev => prev.map(ev => ev.id === id ? {
+          ...ev,
+          title: updated.title || ev.title,
+          date: updated.date || ev.date,
+          // prefer updated ISO instants when returned
+          startDate: updated.startDate || ev.startDate,
+          endDate: updated.endDate || ev.endDate,
+          startTime: updated.time || ev.startTime || (updated.startDate ? (updated.startDate.split('T')[1] || '').slice(0,5) : ev.startTime),
+          endTime: updated.endTime || (updated.endDate ? (updated.endDate.split('T')[1] || '').slice(0,5) : ev.endTime),
+          location: updated.location || ev.location,
+          description: updated.description || ev.description
+        } : ev));
       } catch (err) {
         // network or unexpected error -> rollback
         setEvents(prevEvents);

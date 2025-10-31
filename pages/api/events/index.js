@@ -528,7 +528,7 @@ export default async function handler(req, res) {
                     time: time || null,
                     description: finalDescription,
                     location: location,
-                    color: req.body && req.body.color ? String(req.body.color) : (c && c.color ? c.color : null),
+                    color: req.body && req.body.color ? String(req.body.color) : null,
                     user_id: resolvedUserId ? String(resolvedUserId) : null
                   };
 
@@ -581,7 +581,7 @@ export default async function handler(req, res) {
                       time: time || null,
                       description: finalDescription,
                       location: location,
-                      color: req.body && req.body.color ? String(req.body.color) : (c && c.color ? c.color : null),
+                      color: req.body && req.body.color ? String(req.body.color) : null,
                       user_id: resolvedUserId ? String(resolvedUserId) : null
                     });
                     createdEvents.push(ev2);
@@ -637,7 +637,7 @@ export default async function handler(req, res) {
                     time: time || null,
                     description: finalDescription,
                     location: location,
-                    color: req.body && req.body.color ? String(req.body.color) : (c && c.color ? c.color : null),
+                    color: req.body && req.body.color ? String(req.body.color) : null,
                     user_id: resolvedUserId ? String(resolvedUserId) : null,
                     template_id: tpl.id
                   };
@@ -681,7 +681,7 @@ export default async function handler(req, res) {
                       time: time || null,
                       description: finalDescription,
                       location: location,
-                      color: req.body && req.body.color ? String(req.body.color) : (c && c.color ? c.color : null),
+                      color: req.body && req.body.color ? String(req.body.color) : null,
                       user_id: resolvedUserId ? String(resolvedUserId) : null,
                       template_id: tpl.id
                     });
