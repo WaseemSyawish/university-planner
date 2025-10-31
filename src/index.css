@@ -5141,3 +5141,62 @@ html.dark .form-control::placeholder {
   color: #94a3b8 !important;
   opacity: 1 !important;
 }
+
+/* NUCLEAR OVERRIDE: Force calendar event buttons visible */
+.calendar-root aside .event-edit-btn,
+.calendar-root aside .event-delete-btn {
+  background: transparent !important;
+  border: 1px solid rgba(203, 213, 225, 0.3) !important;
+  width: 28px !important;
+  height: 28px !important;
+  padding: 0 !important;
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  border-radius: 6px !important;
+  opacity: 1 !important;
+  transform: none !important;
+  pointer-events: auto !important;
+  overflow: visible !important;
+}
+
+/* Force SVG and all children visible */
+.calendar-root aside .event-edit-btn svg,
+.calendar-root aside .event-delete-btn svg,
+.calendar-root aside .event-edit-btn svg *,
+.calendar-root aside .event-delete-btn svg * {
+  stroke: #3b82f6 !important;
+  stroke-width: 2px !important;
+  fill: none !important;
+  width: 14px !important;
+  height: 14px !important;
+  display: block !important;
+  opacity: 1 !important;
+  visibility: visible !important;
+  position: static !important;
+  transform: none !important;
+}
+
+.calendar-root aside .event-delete-btn svg,
+.calendar-root aside .event-delete-btn svg * {
+  stroke: #ef4444 !important;
+}
+
+/* Force Lucide icon paths visible */
+.calendar-root aside button svg path,
+.calendar-root aside button svg line,
+.calendar-root aside button svg polyline,
+.calendar-root aside button svg circle {
+  stroke: inherit !important;
+  opacity: 1 !important;
+  visibility: visible !important;
+  display: block !important;
+}
+
+.calendar-root aside .event-edit-btn:hover {
+  background: #dbeafe !important;
+}
+
+.calendar-root aside .event-delete-btn:hover {
+  background: #fee2e2 !important;
+}

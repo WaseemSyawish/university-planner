@@ -58,6 +58,33 @@ const resolveUserId = async (req) => {
     // token may contain userId or sub; fall back to a demo cookie if present
     if (token && token.userId) return token.userId;
     if (token && token.sub) return token.sub;
+    // Allow passing a userId as a query param or header for testing and API clients.
+    // Note: accepting user id from query/header in production is potentially
+    // insecure; prefer standard authenticated tokens. If a user id is supplied
+    // and Prisma is available, ensure a minimal User record exists so FK
+    // constraints won't block creating courses/assessments. This helps external
+    // API clients and non-auth dev flows persist data reliably.
+    if (req && req.query && req.query.userId) {
+      const supplied = String(req.query.userId);
+      try {
+        if (prismaClient) {
+          try {
+            const existing = await prismaClient.user.findUnique({ where: { id: supplied } });
+            if (existing) return existing.id;
+            // create a minimal user record for the supplied id
+            const created = await prismaClient.user.create({ data: { id: supplied, email: `${supplied}@example.dev`, name: supplied } });
+            console.warn('[api/grades] created minimal user for supplied userId:', supplied, ' (ensure this behavior is acceptable for your deployment)');
+            return created.id;
+          } catch (e) {
+            console.warn('[api/grades] failed to ensure user exists for supplied userId, falling back to supplied id:', e && e.message ? e.message : e);
+            return supplied;
+          }
+        }
+      } catch (e) {}
+      return supplied;
+    }
+    // also allow an explicit header X-User-Id (useful for tests or API clients)
+    if (req && req.headers && req.headers['x-user-id']) return req.headers['x-user-id'];
     // fallback to demo-user cookie (for dev/demo flows)
     const raw = req.headers && req.headers.cookie ? req.headers.cookie : '';
     const m = raw.match(/demo-user=([^;]+)/);
@@ -79,9 +106,25 @@ export default async function handler(req, res) {
         const userId = await resolveUserId(req);
         if (!userId) return res.status(401).json({ success: false, error: 'Not authenticated' });
 
+        // Dev-only: quick inspect single course by id for debugging
+        if (process.env.NODE_ENV === 'development' && req.query && req.query.devInspectCourse) {
+          const inspectId = req.query.devInspectCourse;
+          if (prismaClient) {
+            try {
+              console.log('[api/grades] DEV inspect course', inspectId, 'for user', userId);
+              const course = await prismaClient.course.findFirst({ where: { id: inspectId, user_id: userId }, include: { assessments: true } });
+              return res.status(200).json({ success: true, data: course || null, dev: true });
+            } catch (err) {
+              console.error('[api/grades] DEV inspect failed', err);
+            }
+          }
+        }
+
         if (prismaClient) {
           try {
+            console.log('[api/grades] Prisma GET for user:', userId);
             const courses = await prismaClient.course.findMany({ where: { user_id: userId }, include: { assessments: true } });
+            console.log(`[api/grades] Found ${courses.length} courses (user=${userId})`);
             // normalize to previous shape: assessments is array with items parsed from JSON
             const normalized = courses.map(c => ({
               id: c.id,
@@ -110,6 +153,7 @@ export default async function handler(req, res) {
 
         const db = readGradesData();
         const courses = db[userId] || [];
+        console.log('[api/grades] File-fallback GET for user', userId, 'courses:', courses.length);
         res.status(200).json({ success: true, data: courses });
       } catch (error) {
         res.status(500).json({ success: false, error: 'Failed to fetch courses' });
@@ -137,7 +181,6 @@ export default async function handler(req, res) {
             // fallback to file mode
           }
         }
-
         const db = readGradesData();
         const userCourses = db[userId] || [];
         const newCourse = {
@@ -151,7 +194,9 @@ export default async function handler(req, res) {
         userCourses.push(newCourse);
         db[userId] = userCourses;
 
-        if (writeGradesData(db)) {
+        const ok = writeGradesData(db);
+        console.log('[api/grades] File-fallback POST for user', userId, 'createdCourseId=', newCourse.id, 'writeOk=', ok);
+        if (ok) {
           res.status(201).json({ success: true, data: newCourse });
         } else {
           res.status(500).json({ success: false, error: 'Failed to save course' });
@@ -172,9 +217,11 @@ export default async function handler(req, res) {
 
         if (prismaClient) {
           try {
+            console.log('[api/grades] Prisma PUT for user:', userId, 'courseId:', courseId, 'action:', action ? action : 'replace');
             // If a full course object was provided, replace course fields and assessments
             if (course) {
               const existing = await prismaClient.course.findFirst({ where: { id: courseId, user_id: userId } });
+              console.log('[api/grades] Found existing course?', !!existing);
               if (!existing) return res.status(404).json({ success: false, error: 'Course not found' });
 
               await prismaClient.course.update({ where: { id: courseId }, data: { name: course.name || existing.name, code: course.code || existing.code, semester: course.semester || existing.semester, description: course.description || existing.description } });
@@ -182,31 +229,40 @@ export default async function handler(req, res) {
               // replace assessments: delete existing and recreate
               await prismaClient.assessment.deleteMany({ where: { course_id: courseId, user_id: userId } });
               const toCreate = Array.isArray(course.assessments) ? course.assessments.map(a => ({ name: a.name || 'Assessment', weight: a.weight !== undefined ? Number(a.weight) : undefined, items: a.items || [], course_id: courseId, user_id: userId })) : [];
+              console.log('[api/grades] Recreating assessments count=', toCreate.length);
               for (const a of toCreate) {
                 await prismaClient.assessment.create({ data: a });
               }
 
-              const updatedAssessments = await prismaClient.assessment.findMany({ where: { course_id: courseId, user_id: userId } });
-              return res.status(200).json({ success: true, data: { id: courseId, assessments: updatedAssessments } });
+              // Fetch the canonical course with assessments and return the full object
+              const canonical = await prismaClient.course.findFirst({ where: { id: courseId, user_id: userId }, include: { assessments: true } });
+              console.log('[api/grades] After replace, returning canonical course (assessments):', (canonical && canonical.assessments ? canonical.assessments.length : 0));
+              return res.status(200).json({ success: true, data: canonical });
             }
 
             // Otherwise, support action granularity similar to the old API
             switch (action) {
               case 'add_assessment':
                 if (!assessment || !assessment.name) return res.status(400).json({ success: false, error: 'Missing assessment name' });
-                const created = await prismaClient.assessment.create({ data: { name: assessment.name, weight: assessment.weight !== undefined ? Number(assessment.weight) : undefined, items: assessment.items || [], course_id: courseId, user_id: userId } });
-                return res.status(200).json({ success: true, data: created });
+                  console.log('[api/grades] add_assessment for course', courseId, 'user', userId);
+                  await prismaClient.assessment.create({ data: { name: assessment.name, weight: assessment.weight !== undefined ? Number(assessment.weight) : undefined, items: assessment.items || [], course_id: courseId, user_id: userId } });
+                  // return canonical course
+                  const afterAdd = await prismaClient.course.findFirst({ where: { id: courseId, user_id: userId }, include: { assessments: true } });
+                  return res.status(200).json({ success: true, data: afterAdd });
 
               case 'update_assessment':
                 if (!assessment || !assessment.id) return res.status(400).json({ success: false, error: 'Missing assessment id or data' });
-                await prismaClient.assessment.updateMany({ where: { id: assessment.id, course_id: courseId, user_id: userId }, data: { name: assessment.name || undefined, weight: assessment.weight !== undefined ? Number(assessment.weight) : undefined, items: assessment.items || undefined } });
-                const upd = await prismaClient.assessment.findUnique({ where: { id: assessment.id } });
-                return res.status(200).json({ success: true, data: upd });
+                  console.log('[api/grades] update_assessment', assessment.id);
+                  await prismaClient.assessment.updateMany({ where: { id: assessment.id, course_id: courseId, user_id: userId }, data: { name: assessment.name || undefined, weight: assessment.weight !== undefined ? Number(assessment.weight) : undefined, items: assessment.items || undefined } });
+                  const afterUpdate = await prismaClient.course.findFirst({ where: { id: courseId, user_id: userId }, include: { assessments: true } });
+                  return res.status(200).json({ success: true, data: afterUpdate });
 
               case 'delete_assessment':
                 if (!assessment || !assessment.id) return res.status(400).json({ success: false, error: 'Missing assessment id' });
-                await prismaClient.assessment.deleteMany({ where: { id: assessment.id, course_id: courseId, user_id: userId } });
-                return res.status(200).json({ success: true, message: 'Assessment deleted' });
+                  console.log('[api/grades] delete_assessment', assessment.id);
+                  await prismaClient.assessment.deleteMany({ where: { id: assessment.id, course_id: courseId, user_id: userId } });
+                  const afterDelete = await prismaClient.course.findFirst({ where: { id: courseId, user_id: userId }, include: { assessments: true } });
+                  return res.status(200).json({ success: true, data: afterDelete });
 
               default:
                 return res.status(400).json({ success: false, error: 'Invalid action' });
@@ -223,6 +279,8 @@ export default async function handler(req, res) {
         const userCourses = db[userId] || [];
         const courseIndex = userCourses.findIndex(course => course.id === courseId);
         if (courseIndex === -1) return res.status(404).json({ success: false, error: 'Course not found' });
+
+          console.log('[api/grades] File-fallback PUT user=', userId, 'courseIndex=', courseIndex, 'action=', legacyAction || 'replace');
 
         switch (legacyAction) {
           case 'add_assessment':
@@ -264,7 +322,9 @@ export default async function handler(req, res) {
         }
 
         db[userId] = userCourses;
-        if (writeGradesData(db)) {
+        const ok = writeGradesData(db);
+        console.log('[api/grades] File-fallback PUT writeOk=', ok, 'user=', userId, 'courseId=', courseId);
+        if (ok) {
           res.status(200).json({ success: true, data: userCourses[courseIndex] });
         } else {
           res.status(500).json({ success: false, error: 'Failed to update course' });

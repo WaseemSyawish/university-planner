@@ -1153,7 +1153,7 @@ export default function CalendarPage() {
                               <div className="flex gap-1" style={{ position: 'relative', zIndex: 10 }}>
                                 <button
                                   onClick={(e) => handleEventClick(e, ev)}
-                                  className="h-7 w-7 hover:bg-blue-100 rounded-md flex items-center justify-center"
+                                  className="event-edit-btn h-7 w-7 hover:bg-blue-100 rounded-md flex items-center justify-center"
                                   style={{ border: '1px solid #e2e8f0' }}
                                   aria-label={`Edit ${ev.title}`}
                                 >
@@ -1161,7 +1161,7 @@ export default function CalendarPage() {
                                 </button>
                                 <button
                                   onClick={(e) => { e.stopPropagation(); handleDeleteEvent(ev); }}
-                                  className="h-7 w-7 hover:bg-red-100 rounded-md flex items-center justify-center"
+                                  className="event-edit-btn h-7 w-7 hover:bg-red-100 rounded-md flex items-center justify-center"
                                   style={{ border: '1px solid #e2e8f0' }}
                                   aria-label={`Delete ${ev.title}`}
                                 >

@@ -1,9 +1,10 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
-import { Plus, Trash2, Download, Loader2, AlertCircle, Settings, BookOpen, ArrowRight } from 'lucide-react';
+import { Plus, Trash2, Download, Loader2, AlertCircle, Settings, BookOpen, ArrowRight, X } from 'lucide-react';
 import CustomSelect from '../src/components/CustomSelect';
 // WeekView (timetable grid) removed from Attendance page per UI request
 import Notification from '../src/components/Notification';
 import Head from 'next/head';
+import AddSessionModal from '../src/components/attendance/AddSessionModal';
 
 const AttendanceTracker = () => {
   const [sessions, setSessions] = useState([]);
@@ -17,14 +18,7 @@ const AttendanceTracker = () => {
   const [notification, setNotification] = useState(null);
   const [showAddSessionModal, setShowAddSessionModal] = useState(false);
   
-  const [currentUser, setCurrentUser] = useState(null);
   const [editingSession, setEditingSession] = useState(null);
-  // Timetable grid removed from this page — attendance shows sessions only
-
-  // merged classes will include sessions as items for WeekView
-  const classesForWeek = React.useMemo(() => (sessions || []).map(s => ({ id: `att-${s.id}`, title: s.status === 'PRESENT' ? (s.course && s.course.code ? `${s.course.code}` : 'Present') : `${s.status}`, date: s.date, time: s.time || null, raw: { attendance: s } })), [sessions]);
-
-  // Timetable helper functions removed
 
   // Fetch courses on component mount
   const fetchCourses = useCallback(async () => {
@@ -278,15 +272,7 @@ const AttendanceTracker = () => {
     html.dark .text-gray-600 { color: rgba(255,255,255,0.72) !important; }
   `;
 
-  const addSession = async () => {
-    if (!selectedCourseId) {
-      setError('Please select a course first');
-      return;
-    }
-
-    // Deprecated: use addSessionWithPayload(payload) instead.
-    console.warn('addSession() called without payload — use modal-driven flow instead');
-  };
+  // Note: addSession flow is replaced by modal-driven addSessionWithPayload
 
   // New helper: add session with explicit payload (date in YYYY-MM-DD)
   const addSessionWithPayload = async (payload) => {
@@ -657,6 +643,8 @@ const AttendanceTracker = () => {
   );
 }
 
+  // Using extracted AddSessionModal component from src/components/attendance/AddSessionModal.jsx
+
   return (
     <div className="attendance-root calendar-root min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100 p-6">
       <Head>
@@ -989,158 +977,29 @@ const AttendanceTracker = () => {
       </div>
     </div>
 
-    {/* Non-blocking tint overlay (visual only) - does not intercept pointer events */}
+    {/* Modal Backdrop & Add/Edit Session Modal - grouped to ensure valid JSX */}
     {showAddSessionModal && (
-      <div className="fixed inset-0 z-40 pointer-events-none bg-black/20" aria-hidden="true" />
+      <React.Fragment>
+        <div
+          className="fixed inset-0 z-40 bg-black/20"
+          onClick={() => { setShowAddSessionModal(false); setEditingSession(null); }}
+        />
+        <AddSessionModal
+          open={showAddSessionModal}
+          onClose={() => { setShowAddSessionModal(false); setEditingSession(null); }}
+          onSave={addSessionWithPayload}
+          onUpdate={updateSessionFull}
+          onDelete={deleteSessionFull}
+          defaultCourseId={selectedCourseId}
+          editingSession={editingSession}
+        />
+      </React.Fragment>
     )}
-
-    {/* Render modal outside the blurred content so it doesn't get blurred and remains interactive */}
-    <AddSessionModal
-      open={showAddSessionModal}
-      onClose={() => { setShowAddSessionModal(false); setEditingSession(null); }}
-      onSave={(payload) => addSessionWithPayload(payload)}
-      defaultCourseId={selectedCourseId}
-      editingSession={editingSession}
-      onUpdate={(payload) => updateSessionFull(payload)}
-      onDelete={(id) => deleteSessionFull(id)}
-    />
 
   </div>
   );
 };
 
-// Local Add Session Modal
-function AddSessionModal({ open, onClose, onSave, defaultCourseId, initialDate, initialTime, editingSession, onUpdate, onDelete }) {
-  const [visible, setVisible] = useState(false);
-  const [date, setDate] = useState(() => {
-    const t = new Date();
-    const yyyy = t.getFullYear();
-    const mm = String(t.getMonth() + 1).padStart(2, '0');
-    const dd = String(t.getDate()).padStart(2, '0');
-    return `${yyyy}-${mm}-${dd}`;
-  });
-  const [time, setTime] = useState('09:00');
-  const [status, setStatus] = useState('PRESENT');
-  const [points, setPoints] = useState(2);
-  // removed timetable/template options: AddSessionModal focuses on attendance sessions only
-  const modalRef = useRef(null);
 
-  useEffect(() => {
-    if (open) {
-      // consume any global prefill set by WeekView slot clicks
-      try {
-        if (typeof window !== 'undefined' && window.__attendance_prefill) {
-          const p = window.__attendance_prefill || {};
-          if (p.date) setDate(p.date);
-          if (p.time) setTime(p.time);
-          // clear after consuming
-          delete window.__attendance_prefill;
-        }
-        // If editing an existing session, prefer its values (status/points/date/time)
-        if (editingSession && editingSession.id) {
-          if (editingSession.date) setDate(editingSession.date);
-          if (editingSession.time) setTime(editingSession.time || '09:00');
-          if (editingSession.status) setStatus(editingSession.status);
-          if (typeof editingSession.points !== 'undefined') setPoints(editingSession.points);
-          // ignore timetable/template editing; treat as a normal session edit
-        } else {
-          if (initialDate) setDate(initialDate);
-          if (initialTime) setTime(initialTime);
-        }
-      } catch (e) { /* ignore */ }
-      setVisible(true);
-    } else {
-      setVisible(false);
-    }
-  }, [open]);
-
-  useEffect(() => {
-    if (open) setTimeout(() => modalRef.current?.querySelector('input, select')?.focus?.(), 80);
-  }, [open]);
-
-  // Close modal when clicking outside the modal panel (robust fallback)
-  useEffect(() => {
-    if (!open) return;
-    function onDocMouseDown(e) {
-      try {
-        if (modalRef && modalRef.current && !modalRef.current.contains(e.target)) {
-          onClose();
-        }
-      } catch (err) {
-        // ignore
-      }
-    }
-    document.addEventListener('mousedown', onDocMouseDown);
-    return () => document.removeEventListener('mousedown', onDocMouseDown);
-  }, [open, onClose]);
-
-  const handleSave = () => {
-    const payload = { date, time, status, points: Number(points), courseId: defaultCourseId };
-    if (editingSession && editingSession.id) {
-      payload.id = editingSession.id;
-      if (onUpdate) onUpdate(payload);
-    } else {
-      if (onSave) onSave(payload);
-    }
-    onClose();
-  };
-
-  if (!open) return null;
-
-  return (
-    <div className={`fixed inset-0 z-50 flex items-center justify-center px-4 sm:px-6 ${visible ? 'pointer-events-auto' : 'pointer-events-none'}`} aria-hidden={!visible}>
-      {/* backdrop intentionally removed to avoid blocking interactions; modal remains centered */}
-
-  <div ref={modalRef} className={`relative z-50 w-full max-w-md mx-auto transform transition-all duration-220 ${visible ? 'opacity-100 translate-y-0 scale-100' : 'opacity-0 translate-y-6 scale-95'}`} role="dialog" aria-modal="true" onMouseDown={(e) => e.stopPropagation()}>
-  <div className="cozy rounded-xl shadow-2xl overflow-hidden">
-          <div className="flex items-center justify-between p-6 border-b">
-            <h3 className="text-lg font-semibold text-gray-800">{editingSession && editingSession.id ? 'Edit Session' : 'Add Session'}</h3>
-            <button onClick={onClose} aria-label="Close" className="text-gray-500 hover:text-gray-700 rounded p-2">×</button>
-          </div>
-          <div className="p-6 space-y-4">
-            <div>
-              <label className="block text-sm text-gray-500 mb-1">Date</label>
-              <input type="date" value={date} onChange={(e) => setDate(e.target.value)} className="w-full px-3 py-2 border rounded text-black dark:text-white" />
-            </div>
-            <div className="grid grid-cols-2 gap-3">
-              <div>
-                <label className="block text-sm text-gray-500 mb-1">Time</label>
-                <input type="time" value={time} onChange={(e) => setTime(e.target.value)} className="w-full px-3 py-2 border rounded text-black dark:text-white" />
-              </div>
-              <div>
-                <label className="block text-sm text-gray-500 mb-1">Status</label>
-                <select value={status} onChange={(e) => setStatus(e.target.value)} className="w-full px-3 py-2 border rounded text-black dark:text-white">
-                  <option value="PRESENT">Present</option>
-                  <option value="ABSENT">Absent</option>
-                  <option value="LATE">Late</option>
-                  <option value="HOLIDAY">Holiday</option>
-                  <option value="EXCUSED">Excused</option>
-                </select>
-              </div>
-            </div>
-            <div>
-              <label className="block text-sm text-gray-500 mb-1">Points</label>
-              <input type="number" min="0" max="2" value={points} onChange={(e) => setPoints(e.target.value)} className="w-24 px-3 py-2 border rounded" />
-            </div>
-            <div className="flex justify-between items-center">
-              <div>
-                {editingSession && editingSession.id ? (
-                  <button onClick={() => { if (onDelete) onDelete(editingSession.id); onClose(); }} className="px-4 py-2 rounded bg-red-600 text-white">Delete</button>
-                ) : (
-                  <button onClick={onClose} className="px-4 py-2 rounded border">Cancel</button>
-                )}
-              </div>
-              <div>
-                <button onClick={handleSave} className="px-4 py-2 rounded bg-indigo-600 text-white">{editingSession && editingSession.id ? 'Save Changes' : 'Create Session'}</button>
-              </div>
-            </div>
-          </div>
-        </div>
-      </div>
-    </div>
-  );
-};
 
 export default AttendanceTracker;
-
-// Note: The modal overlay and modal are rendered from the top-level component return

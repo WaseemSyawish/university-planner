@@ -1,6 +1,6 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import CustomSelect from '../src/components/CustomSelect';
-import { GraduationCap, TrendingUp, Award, BookOpen, Plus, Trash2, Edit2, X, ChevronDown, ChevronUp, ChevronLeft, ChevronRight } from 'lucide-react';
+import { GraduationCap, TrendingUp, Award, BookOpen, Plus, Trash2, Edit2, X, ChevronDown, ChevronUp, ChevronLeft, ChevronRight, FileText, Tag, Scale, Check, BarChart3, Target, HelpCircle, MessageCircle, Microscope, MapPin } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import Head from 'next/head';
 
@@ -27,6 +27,13 @@ const GradesPage = () => {
     score: '',
     maxScore: 100
   });
+  const [isDark, setIsDark] = useState(false);
+  const catNameRef = useRef(null);
+  const itemNameRef = useRef(null);
+  const typeRef = useRef(null);
+  const weightRef = useRef(null);
+  const scoreRef = useRef(null);
+  const maxScoreRef = useRef(null);
 
   const calculateCategoryAverage = (items) => {
     if (items.length === 0) return 0;
@@ -84,41 +91,86 @@ const GradesPage = () => {
   };
 
   const getCategoryIcon = (type) => {
+    // Return Lucide icon components with per-type color accents
+    const size = 'w-6 h-6';
+    const colorMap = {
+      exam: 'text-rose-600 dark:text-rose-400',
+      quiz: 'text-amber-500 dark:text-amber-300',
+      assignment: 'text-sky-600 dark:text-sky-300',
+      project: 'text-purple-600 dark:text-purple-300',
+      lab: 'text-green-600 dark:text-green-300',
+      participation: 'text-indigo-600 dark:text-indigo-300',
+      default: 'text-slate-800 dark:text-slate-100'
+    };
+    const cls = `${size} ${colorMap[type] || colorMap.default}`;
     switch(type) {
-      case 'exam': return '📝';
-      case 'quiz': return '❓';
-      case 'assignment': return '📄';
-      case 'project': return '🎯';
-      case 'lab': return '🔬';
-      case 'participation': return '💬';
-      default: return '📌';
+      case 'exam': return <FileText className={cls} />;
+      case 'quiz': return <HelpCircle className={cls} />;
+      case 'assignment': return <FileText className={cls} />;
+      case 'project': return <Target className={cls} />;
+      case 'lab': return <Microscope className={cls} />;
+      case 'participation': return <MessageCircle className={cls} />;
+      default: return <MapPin className={cls} />;
     }
   };
 
+  // Options for the category type selector (used in the Add Category modal)
+  const categoryTypeOptions = [
+    { value: 'assignment', label: (<span className="flex items-center gap-2"><FileText className="w-4 h-4 text-sky-600 dark:text-sky-300" />Assignment</span>) },
+    { value: 'quiz', label: (<span className="flex items-center gap-2"><HelpCircle className="w-4 h-4 text-amber-500 dark:text-amber-300" />Quiz</span>) },
+    { value: 'exam', label: (<span className="flex items-center gap-2"><FileText className="w-4 h-4 text-rose-600 dark:text-rose-400" />Exam</span>) },
+    { value: 'project', label: (<span className="flex items-center gap-2"><Target className="w-4 h-4 text-purple-600 dark:text-purple-300" />Project</span>) },
+    { value: 'lab', label: (<span className="flex items-center gap-2"><Microscope className="w-4 h-4 text-green-600 dark:text-green-300" />Lab</span>) },
+    { value: 'participation', label: (<span className="flex items-center gap-2"><MessageCircle className="w-4 h-4 text-indigo-600 dark:text-indigo-300" />Participation</span>) },
+    { value: 'other', label: (<span className="flex items-center gap-2"><MapPin className="w-4 h-4 text-slate-700 dark:text-slate-300" />Other</span>) }
+  ];
+
   const handleAddCategory = () => {
     if (!newCategory.name || !newCategory.weight) return;
-    
-    const category = {
-      id: Date.now(),
+    // Prepare local category payload
+    const categoryPayload = {
       name: newCategory.name,
       weight: parseFloat(newCategory.weight),
-      type: newCategory.type,
+      type: newCategory.type || 'assignment',
       items: []
     };
 
-    setCourses(courses.map(course => 
-      course.id === selectedCourse.id 
-        ? { ...course, categories: [...course.categories, category] }
-        : course
-    ));
+    // Optimistically update UI with a temporary id
+    const tempId = Date.now();
+  const optimistic = { ...categoryPayload, id: tempId };
+    setCourses(prev => prev.map(course => course.id === selectedCourse.id ? { ...course, categories: [...(course.categories || []), optimistic] } : course));
 
     setNewCategory({ name: '', weight: '', type: 'assignment' });
     setShowCategoryModal(false);
+
+    // Persist to server: call PUT /api/grades with action add_assessment
+    (async () => {
+      try {
+        const body = { courseId: selectedCourse.id, action: 'add_assessment', assessment: categoryPayload };
+        const res = await fetch('/api/grades', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+        if (!res.ok) throw new Error('Failed to persist category');
+        const js = await res.json().catch(() => null);
+        if (js && js.data) {
+          // server returned canonical course object
+          setCourses(prev => prev.map(course => course.id === selectedCourse.id ? ({ ...course, categories: Array.isArray(js.data.assessments) ? js.data.assessments : (js.data.categories || []) }) : course));
+          return;
+        }
+        // fallback: refresh full grades list
+        const listRes = await fetch('/api/grades');
+        if (listRes.ok) {
+          const listJs = await listRes.json().catch(() => null);
+          const arr = listJs && Array.isArray(listJs.data) ? listJs.data : [];
+          const found = arr.find(c => String(c.id) === String(selectedCourse.id));
+          if (found) setCourses(prev => prev.map(course => course.id === selectedCourse.id ? ({ ...course, categories: Array.isArray(found.assessments) ? found.assessments : (found.categories || []) }) : course));
+        }
+      } catch (e) {
+        console.warn('persist category failed', e);
+      }
+    })();
   };
 
   const handleAddItem = () => {
     if (!newItem.name || !newItem.score || !newItem.maxScore) return;
-    
     const item = {
       id: Date.now(),
       name: newItem.name,
@@ -126,29 +178,62 @@ const GradesPage = () => {
       maxScore: parseFloat(newItem.maxScore)
     };
 
-    setCourses(courses.map(course => 
-      course.id === selectedCourse.id 
-        ? {
-            ...course,
-            categories: course.categories.map(cat =>
-              cat.id === selectedCategory.id
-                ? { ...cat, items: [...cat.items, item] }
-                : cat
-            )
-          }
-        : course
-    ));
-
+    // Optimistic UI update
+    setCourses(prev => prev.map(course => course.id === selectedCourse.id ? ({ ...course, categories: course.categories.map(cat => cat.id === selectedCategory.id ? ({ ...cat, items: [...(cat.items || []), item] }) : cat) }) : course));
     setNewItem({ name: '', score: '', maxScore: 100 });
     setShowItemModal(false);
+
+    // Persist updated assessment items to server. If the category has an id (server), update via update_assessment.
+    (async () => {
+      try {
+        const targetCourse = courses.find(c => c.id === selectedCourse.id) || selectedCourse;
+        const targetCategory = (targetCourse.categories || []).find(c => c.id === selectedCategory.id) || selectedCategory;
+        // If category has an id that looks server-generated (string/uuid), use update_assessment
+        if (targetCategory && targetCategory.id && typeof targetCategory.id === 'string') {
+          const assessmentPayload = { id: targetCategory.id, items: [...(targetCategory.items || []), item] };
+          const body = { courseId: selectedCourse.id, action: 'update_assessment', assessment: assessmentPayload };
+          const res = await fetch('/api/grades', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+          if (res.ok) {
+            const js = await res.json().catch(() => null);
+            if (js && js.data) {
+              setCourses(prev => prev.map(course => course.id === selectedCourse.id ? ({ ...course, categories: Array.isArray(js.data.assessments) ? js.data.assessments : (js.data.categories || []) }) : course));
+            }
+          }
+        } else {
+          // If category is still optimistic (numeric id), we may need to create it first via add_assessment then update items.
+          const createBody = { courseId: selectedCourse.id, action: 'add_assessment', assessment: { name: targetCategory.name, weight: targetCategory.weight || 0, items: targetCategory.items || [] } };
+          const createRes = await fetch('/api/grades', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(createBody) });
+          if (createRes.ok) {
+            const createJs = await createRes.json().catch(() => null);
+            if (createJs && createJs.data) {
+              setCourses(prev => prev.map(course => course.id === selectedCourse.id ? ({ ...course, categories: Array.isArray(createJs.data.assessments) ? createJs.data.assessments : (createJs.data.categories || []) }) : course));
+            }
+          }
+        }
+      } catch (e) {
+        console.warn('persist item failed', e);
+      }
+    })();
   };
 
   const handleDeleteCategory = (courseId, categoryId) => {
-    setCourses(courses.map(course => 
-      course.id === courseId 
-        ? { ...course, categories: course.categories.filter(c => c.id !== categoryId) }
-        : course
-    ));
+    // Optimistically remove
+    setCourses(prev => prev.map(course => course.id === courseId ? ({ ...course, categories: (course.categories || []).filter(c => c.id !== categoryId) }) : course));
+    // If categoryId looks like a server id (string), ask server to delete
+    (async () => {
+      try {
+        if (categoryId && typeof categoryId === 'string') {
+          const body = { courseId, action: 'delete_assessment', assessment: { id: categoryId } };
+          const res = await fetch('/api/grades', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+          if (res.ok) {
+            const js = await res.json().catch(() => null);
+            if (js && js.data) {
+              setCourses(prev => prev.map(course => course.id === courseId ? ({ ...course, categories: Array.isArray(js.data.assessments) ? js.data.assessments : (js.data.categories || []) }) : course));
+            }
+          }
+        }
+      } catch (e) { console.warn('delete category failed', e); }
+    })();
   };
 
   const handleDeleteItem = (courseId, categoryId, itemId) => {
@@ -197,6 +282,100 @@ const GradesPage = () => {
   // Updated to mirror `pages/modules.js` auth check and to be resilient when grades data is absent
   useEffect(() => {
     let mounted = true;
+    // Ensure certain modal inputs render white text in dark mode even when other CSS overrides exist
+    const applyInputColors = () => {
+      try {
+        const darkNow = typeof document !== 'undefined' && (document.documentElement.classList.contains('dark') || window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches);
+        // update state so render can apply inline styles
+        setIsDark(!!darkNow);
+
+        const setColor = (el) => {
+          if (!el) return;
+          if (darkNow) {
+            try {
+              // Normal inline styles for text color
+              el.style.color = '#ffffff';
+              el.style.caretColor = '#ffffff';
+              el.style.textShadow = '0 0 1px rgba(255,255,255,0.02)';
+              // WebKit-specific property (may be needed for autofill / Chromium rendering)
+              el.style.WebkitTextFillColor = '#ffffff';
+              // Subtle outline / focus ring fallback (less bright, less thick)
+              el.style.boxShadow = '0 0 0 2px rgba(255,255,255,0.04)';
+              el.style.borderColor = 'rgba(255,255,255,0.12)';
+
+              // Also set with priority to override UA styles (use setProperty with 'important')
+              el.style.setProperty('color', '#ffffff', 'important');
+              el.style.setProperty('-webkit-text-fill-color', '#ffffff', 'important');
+              el.style.setProperty('caret-color', '#ffffff', 'important');
+              el.style.setProperty('text-shadow', '0 0 1px rgba(255,255,255,0.02)', 'important');
+              el.style.setProperty('box-shadow', '0 0 0 2px rgba(255,255,255,0.04)', 'important');
+              el.style.setProperty('border-color', 'rgba(255,255,255,0.12)', 'important');
+              el.style.setProperty('outline', '1px solid rgba(255,255,255,0.45)', 'important');
+            } catch (e) {}
+          } else {
+            try {
+              el.style.color = '';
+              el.style.caretColor = '';
+              el.style.textShadow = '';
+              el.style.WebkitTextFillColor = '';
+              el.style.boxShadow = '';
+              el.style.borderColor = '';
+              el.style.removeProperty('color');
+              el.style.removeProperty('-webkit-text-fill-color');
+              el.style.removeProperty('caret-color');
+              el.style.removeProperty('text-shadow');
+              el.style.removeProperty('box-shadow');
+              el.style.removeProperty('border-color');
+              el.style.removeProperty('outline');
+            } catch (e) {}
+          }
+        };
+
+  // Apply immediately (including the CustomSelect wrapper by id)
+  setColor(catNameRef.current);
+  setColor(itemNameRef.current);
+  setColor(typeRef.current);
+  setColor(weightRef.current);
+  setColor(scoreRef.current);
+  setColor(maxScoreRef.current);
+  // CustomSelect wrapper has id 'grades-cat-type'
+  try { setColor(document.getElementById('grades-cat-type')); } catch (e) {}
+
+        // Re-apply shortly after (handles autofill and late UA style application)
+        setTimeout(() => {
+          setColor(catNameRef.current);
+          setColor(itemNameRef.current);
+          setColor(typeRef.current);
+          setColor(weightRef.current);
+          setColor(scoreRef.current);
+          setColor(maxScoreRef.current);
+          try { setColor(document.getElementById('grades-cat-type')); } catch (e) {}
+        }, 120);
+
+        // Ensure color is reapplied on focus (some browsers style focused input differently)
+        [catNameRef.current, itemNameRef.current, typeRef.current, weightRef.current, scoreRef.current, maxScoreRef.current].forEach(el => {
+          if (!el) return;
+          el.addEventListener('focus', () => setColor(el));
+          el.addEventListener('input', () => setColor(el));
+        });
+        // Also attach focus listeners to the CustomSelect wrapper/button
+        try {
+          const cs = document.getElementById('grades-cat-type');
+          if (cs) {
+            cs.addEventListener('focusin', () => setColor(cs));
+            cs.addEventListener('click', () => setColor(cs));
+          }
+        } catch (e) {}
+      } catch (e) {}
+    };
+    // Apply once now
+    applyInputColors();
+    // Watch for html dark class changes
+    let mo;
+    try {
+      mo = new MutationObserver(applyInputColors);
+      mo.observe(document.documentElement, { attributes: true, attributeFilter: ['class'] });
+    } catch (e) {}
     async function loadAll() {
       try {
         // Ensure user is resolved. Treat explicit 401/403 as unauthenticated and redirect.
@@ -222,6 +401,19 @@ const GradesPage = () => {
 
         if (gradesResP.status === 'fulfilled' && gradesResP.value.ok) {
           try { gradesBody = await gradesResP.value.json(); } catch(e) { gradesBody = { success: false, data: [] }; }
+        } else {
+          // In dev environments where auth tokens may not be present, try a smoke-user fallback
+          try {
+            if (typeof window !== 'undefined') {
+              const host = window.location.hostname;
+              if (host === 'localhost' || host === '127.0.0.1' || host === '') {
+                const fallback = await fetch('/api/grades?userId=smoke_user');
+                if (fallback && fallback.ok) {
+                  try { gradesBody = await fallback.json(); } catch (e) { /* ignore */ }
+                }
+              }
+            }
+          } catch (e) { /* ignore */ }
         }
 
         const serverCourses = Array.isArray(coursesBody.courses) ? coursesBody.courses : [];
@@ -311,7 +503,7 @@ const GradesPage = () => {
       }
     }
     loadAll();
-    return () => { mounted = false; };
+    return () => { mounted = false; if (mo) mo.disconnect(); };
   }, []);
 
   return (
@@ -319,6 +511,25 @@ const GradesPage = () => {
       <Head>
         <title>Grades — University Planner</title>
       </Head>
+      <style dangerouslySetInnerHTML={{__html: `
+        /* Force bright white for specific modal inputs in dark mode */
+        #grades-cat-name,
+        #grades-cat-type,
+        #grades-item-name {
+          color: #ffffff !important;
+          -webkit-text-fill-color: #ffffff !important;
+          caret-color: #ffffff !important;
+          text-shadow: 0 0 1px rgba(255,255,255,0.03) !important;
+        }
+
+        /* Make placeholder text darker grey for modal forms (all inputs/selects/textareas inside modal overlays) */
+        .fixed.inset-0 input::placeholder,
+        .fixed.inset-0 textarea::placeholder,
+        .fixed.inset-0 select::placeholder {
+          color: #4B5563 !important; /* Tailwind gray-600 - darker placeholder */
+          opacity: 1 !important;
+        }
+      `}} />
       {/* Navbar: use the exact Calendar header markup/styles for consistency */}
       <header className="bg-white/95 backdrop-blur-xl border-b border-slate-200/60 px-6 py-4 sticky top-0 z-40 shadow-sm">
         <div className="flex items-center justify-between max-w-7xl mx-auto">
@@ -477,7 +688,7 @@ const GradesPage = () => {
                         <div className="bg-white p-4 dark:bg-[#071423]">
                           <div className="flex items-center justify-between">
                             <div className="flex items-center gap-3 flex-1">
-                              <span className="text-2xl">{getCategoryIcon(category.type)}</span>
+                              {getCategoryIcon(category.type || 'assignment')}
                               <div className="flex-1">
                                 <div className="flex items-center gap-2">
                                   <h5 className="font-semibold text-slate-900 dark:text-slate-100">{category.name}</h5>
@@ -559,66 +770,77 @@ const GradesPage = () => {
         </div>
       </div>
 
-      {/* Add Category Modal */}
+{/* Add Category Modal */}
       {showCategoryModal && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-xl shadow-2xl max-w-md w-full p-6 dark:bg-[#071423]">
-            <div className="flex justify-between items-center mb-6">
-              <h3 className="text-2xl font-bold text-slate-900 dark:text-slate-100">Add Grading Category</h3>
+          <div className="w-full max-h-[85vh] bg-white dark:bg-gray-950 overflow-y-auto rounded-xl shadow-2xl max-w-md w-full p-6">
+            <div className="flex justify-between items-center mb-2">
+              <h3 className="text-2xl font-bold text-gray-900 dark:text-white">Add Grading Category</h3>
               <button 
                 onClick={() => setShowCategoryModal(false)}
-                className="p-1 hover:bg-gray-100 rounded transition-colors dark:hover:bg-[#061422]"
+                className="p-1 hover:bg-gray-100 dark:hover:bg-gray-700 rounded transition-colors text-gray-500 dark:text-gray-400"
               >
                 <X className="w-6 h-6" />
               </button>
             </div>
+            <p className="text-gray-600 dark:text-gray-400 mb-6">Add a new category to track your grades</p>
 
-            <div className="space-y-4">
+            <div className="space-y-5">
               <div>
-                <label className="block text-sm font-medium text-gray-700 dark:text-slate-300 mb-2">Category Name</label>
+                <label className="flex items-center gap-2 text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                  <FileText className="w-4 h-4 text-gray-500 dark:text-gray-400" />
+                  Category Name
+                </label>
                 <input
                   type="text"
-                  placeholder="e.g., Quizzes, Assignments, Midterm"
-                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-600 bg-white dark:bg-[#071423] dark:border-gray-700 dark:text-slate-200 text-gray-900"
+                  id="grades-cat-name"
+                  placeholder="e.g., Team Meeting, Study Session"
+                  ref={catNameRef}
+                  style={isDark ? { color: '#ffffff', WebkitTextFillColor: '#ffffff', caretColor: '#ffffff', textShadow: '0 0 1px rgba(255,255,255,0.02)' } : undefined}
+                  className="w-full px-4 py-3 bg-white dark:bg-[#0f1419] border border-gray-300 dark:border-gray-700 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-gray-900 dark:text-white dark:!text-white font-semibold caret-white placeholder-gray-400 dark:placeholder-gray-400"
                   value={newCategory.name}
                   onChange={(e) => setNewCategory({...newCategory, name: e.target.value})}
                 />
               </div>
 
               <div>
-                <label className="block text-sm font-medium text-gray-700 dark:text-slate-300 mb-2">Type</label>
-                <select
-                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-600 bg-white dark:bg-[#071423] dark:border-gray-700 dark:text-slate-200 text-gray-900"
-                  value={newCategory.type}
-                  onChange={(e) => setNewCategory({...newCategory, type: e.target.value})}
-                >
-                  <option value="assignment">📄 Assignment</option>
-                  <option value="quiz">❓ Quiz</option>
-                  <option value="exam">📝 Exam</option>
-                  <option value="project">🎯 Project</option>
-                  <option value="lab">🔬 Lab</option>
-                  <option value="participation">💬 Participation</option>
-                  <option value="other">📌 Other</option>
-                </select>
+                <label className="flex items-center gap-2 text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                  <Tag className="w-4 h-4 text-gray-500 dark:text-gray-400" />
+                  Type
+                </label>
+                <div id="grades-cat-type">
+                  <CustomSelect
+                    options={categoryTypeOptions}
+                    value={newCategory.type}
+                    onChange={(v) => setNewCategory({...newCategory, type: v})}
+                    placeholder="Select type"
+                    className="w-full"
+                    id="grades-cat-type"
+                  />
+                </div>
               </div>
 
               <div>
-                <label className="block text-sm font-medium text-gray-700 dark:text-slate-300 mb-2">Weight (%)</label>
+                <label className="flex items-center gap-2 text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                  <Scale className="w-4 h-4 text-gray-500 dark:text-gray-400" />
+                  Weight (%)
+                </label>
                 <input
                   type="number"
                   placeholder="20"
                   min="0"
                   max="100"
-                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-600 bg-white dark:bg-[#071423] dark:border-gray-700 dark:text-slate-200 text-gray-900"
+                  ref={weightRef}
+                  className="w-full px-4 py-3 bg-white dark:bg-[#0f1419] border border-gray-300 dark:border-gray-700 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-gray-900 dark:text-white dark:!text-white font-semibold caret-white placeholder-gray-400 dark:placeholder-gray-400"
                   value={newCategory.weight}
                   onChange={(e) => setNewCategory({...newCategory, weight: e.target.value})}
                 />
-                <p className="text-xs text-gray-500 dark:text-slate-300 mt-1">How much this category counts toward the final grade</p>
+                <p className="text-xs text-gray-500 dark:text-gray-500 mt-1">How much this category counts toward the final grade</p>
               </div>
 
-              <div className="bg-purple-50 border border-purple-200 rounded-lg p-3 dark:bg-purple-900 dark:border-transparent">
-                <p className="text-sm text-gray-700 dark:text-slate-200">
-                  <span className="font-medium">Course:</span> {selectedCourse.code} - {selectedCourse.name}
+              <div className="bg-blue-50 dark:bg-blue-500 dark:bg-opacity-10 border border-blue-200 dark:border-blue-500 dark:border-opacity-30 rounded-lg p-3">
+                <p className="text-sm text-gray-700 dark:text-gray-300">
+                  <span className="font-medium text-gray-900 dark:text-white">Course:</span> {selectedCourse.code} - {selectedCourse.name}
                 </p>
               </div>
             </div>
@@ -626,14 +848,15 @@ const GradesPage = () => {
             <div className="flex gap-3 mt-6">
               <button
                 onClick={() => setShowCategoryModal(false)}
-                className="flex-1 px-4 py-2 border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-50 transition-colors font-medium bg-white dark:bg-[#071423] dark:border-gray-700 dark:text-slate-200 dark:hover:bg-[#061422]"
+                className="flex-1 px-4 py-3 bg-white dark:bg-[#2a2f3e] border border-gray-300 dark:border-gray-700 rounded-lg text-gray-700 dark:text-white hover:bg-gray-50 dark:hover:bg-[#363b4d] transition-colors font-medium"
               >
                 Cancel
               </button>
               <button
                 onClick={handleAddCategory}
-                className="flex-1 px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition-colors font-medium"
+                className="flex-1 px-4 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors font-medium flex items-center justify-center gap-2"
               >
+                <Check className="w-5 h-5" />
                 Add Category
               </button>
             </div>
@@ -644,24 +867,31 @@ const GradesPage = () => {
       {/* Add Item Modal */}
       {showItemModal && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-xl shadow-2xl max-w-md w-full p-6 dark:bg-[#071423]">
-            <div className="flex justify-between items-center mb-6">
-              <h3 className="text-2xl font-bold text-slate-900 dark:text-slate-100">Add Item</h3>
+          <div className="w-full max-h-[85vh] bg-white dark:bg-gray-950 overflow-y-auto rounded-xl shadow-2xl max-w-md w-full p-6">
+            <div className="flex justify-between items-center mb-2">
+              <h3 className="text-2xl font-bold text-gray-900 dark:text-white">Add Item</h3>
               <button 
                 onClick={() => setShowItemModal(false)}
-                className="p-1 hover:bg-gray-100 rounded transition-colors dark:hover:bg-[#061422]"
+                className="p-1 hover:bg-gray-100 dark:hover:bg-gray-700 rounded transition-colors text-gray-500 dark:text-gray-400"
               >
                 <X className="w-6 h-6" />
               </button>
             </div>
+            <p className="text-gray-600 dark:text-gray-400 mb-6">Add a new grade item to this category</p>
 
-            <div className="space-y-4">
+            <div className="space-y-5">
               <div>
-                <label className="block text-sm font-medium text-gray-700 dark:text-slate-300 mb-2">Item Name</label>
+                <label className="flex items-center gap-2 text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                  <FileText className="w-4 h-4 text-gray-500 dark:text-gray-400" />
+                  Item Name
+                </label>
                 <input
                   type="text"
+                  id="grades-item-name"
                   placeholder="e.g., Quiz 1, Assignment 3, Midterm"
-                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-600 dark:bg-[#071423] dark:border-gray-700 dark:text-slate-200"
+                  ref={itemNameRef}
+                  style={isDark ? { color: '#ffffff', WebkitTextFillColor: '#ffffff', caretColor: '#ffffff', textShadow: '0 0 1px rgba(255,255,255,0.02)' } : undefined}
+                  className="w-full px-4 py-3 bg-white dark:bg-[#0f1419] border border-gray-300 dark:border-gray-700 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-gray-900 dark:text-white dark:!text-white font-semibold caret-white placeholder-gray-400 dark:placeholder-gray-400"
                   value={newItem.name}
                   onChange={(e) => setNewItem({...newItem, name: e.target.value})}
                 />
@@ -669,36 +899,44 @@ const GradesPage = () => {
 
               <div className="grid grid-cols-2 gap-4">
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 dark:text-slate-300 mb-2">Score Earned</label>
+                  <label className="flex items-center gap-2 text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                    <BarChart3 className="w-4 h-4 text-gray-500 dark:text-gray-400" />
+                    Score Earned
+                  </label>
                   <input
                     type="number"
                     placeholder="85"
                     min="0"
-                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-600 dark:bg-[#071423] dark:border-gray-700 dark:text-slate-200"
+                    ref={scoreRef}
+                    className="w-full px-4 py-3 bg-white dark:bg-[#0f1419] border border-gray-300 dark:border-gray-700 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-gray-900 dark:text-white dark:!text-white font-semibold caret-white placeholder-gray-400 dark:placeholder-gray-400"
                     value={newItem.score}
                     onChange={(e) => setNewItem({...newItem, score: e.target.value})}
                   />
                 </div>
 
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 dark:text-slate-300 mb-2">Max Score</label>
+                  <label className="flex items-center gap-2 text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                    <Target className="w-4 h-4 text-gray-500 dark:text-gray-400" />
+                    Max Score
+                  </label>
                   <input
                     type="number"
                     placeholder="100"
                     min="0"
-                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-600 dark:bg-[#071423] dark:border-gray-700 dark:text-slate-200"
+                    ref={maxScoreRef}
+                    className="w-full px-4 py-3 bg-white dark:bg-[#0f1419] border border-gray-300 dark:border-gray-700 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-gray-900 dark:text-white dark:!text-white font-semibold caret-white placeholder-gray-400 dark:placeholder-gray-400"
                     value={newItem.maxScore}
                     onChange={(e) => setNewItem({...newItem, maxScore: e.target.value})}
                   />
                 </div>
               </div>
 
-              <div className="bg-purple-50 border border-purple-200 rounded-lg p-3 dark:bg-purple-900 dark:border-transparent">
-                <p className="text-sm text-gray-700 dark:text-slate-200">
-                  <span className="font-medium">Adding to:</span> {selectedCategory.name} ({selectedCategory.weight}%)
+              <div className="bg-blue-50 dark:bg-blue-500 dark:bg-opacity-10 border border-blue-200 dark:border-blue-500 dark:border-opacity-30 rounded-lg p-3">
+                <p className="text-sm text-gray-700 dark:text-gray-300">
+                  <span className="font-medium text-gray-900 dark:text-white">Adding to:</span> {selectedCategory.name} ({selectedCategory.weight}%)
                 </p>
-                <p className="text-sm text-gray-700 mt-1 dark:text-slate-200">
-                  <span className="font-medium">Course:</span> {selectedCourse.code}
+                <p className="text-sm text-gray-700 dark:text-gray-300 mt-1">
+                  <span className="font-medium text-gray-900 dark:text-white">Course:</span> {selectedCourse.code}
                 </p>
               </div>
             </div>
@@ -706,14 +944,15 @@ const GradesPage = () => {
             <div className="flex gap-3 mt-6">
               <button
                 onClick={() => setShowItemModal(false)}
-                className="flex-1 px-4 py-2 border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-50 transition-colors font-medium dark:bg-[#071423] dark:border-gray-700 dark:text-slate-200 dark:hover:bg-[#061422]"
+                className="flex-1 px-4 py-3 bg-white dark:bg-[#2a2f3e] border border-gray-300 dark:border-gray-700 rounded-lg text-gray-700 dark:text-white hover:bg-gray-50 dark:hover:bg-[#363b4d] transition-colors font-medium"
               >
                 Cancel
               </button>
               <button
                 onClick={handleAddItem}
-                className="flex-1 px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition-colors font-medium"
+                className="flex-1 px-4 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors font-medium flex items-center justify-center gap-2"
               >
+                <Check className="w-5 h-5" />
                 Add Item
               </button>
             </div>

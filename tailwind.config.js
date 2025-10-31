@@ -11,6 +11,15 @@ module.exports = {
   ],
   theme: {
     extend: {
+      colors: {
+        status: {
+          present: '#10B981', // green-500
+          absent: '#EF4444',  // red-500
+          late: '#F97316',    // orange-500
+          excused: '#F59E0B', // yellow-500
+          holiday: '#3B82F6'  // blue-500
+        }
+      },
       // Ensure gradient colors are included
       gradientColorStops: theme => theme('colors'),
     },

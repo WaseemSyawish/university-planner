@@ -130,11 +130,71 @@ export default function CourseModal({ open, course, onClose, onSaved }) {
       const payload = JSON.parse(JSON.stringify(local));
       // ensure numeric fields
       payload.assessments = (payload.assessments || []).map(a => ({ ...a, weight: Number(a.weight) || 0, items: (a.items || []).map(it => ({ ...it, grade: it.grade === '' ? '' : Number(it.grade), maxGrade: it.maxGrade === '' ? '' : Number(it.maxGrade) })) }));
-      const res = await fetch('/api/grades', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ courseId: payload.id, course: payload }) });
+      // In local/dev environments the API may require an explicit userId query param
+      // if next-auth token resolution isn't present. Add a smoke_user fallback on localhost.
+      let apiUrl = '/api/grades';
+      try {
+        if (typeof window !== 'undefined') {
+          const host = window.location.hostname;
+          if (host === 'localhost' || host === '127.0.0.1' || host === '') {
+            apiUrl += '?userId=smoke_user';
+          }
+        }
+      } catch (e) { /* ignore */ }
+
+      // If the course id looks like a client-temporary id (numeric timestamp) then
+      // the course probably doesn't exist in the DB yet. Create it first so the
+      // subsequent PUT can update the server-side course and persist assessments.
+      const isTempId = (id) => {
+        try {
+          if (!id) return true;
+          // UUID v4-ish pattern check
+          const s = String(id);
+          if (/^[0-9]+$/.test(s)) return true; // pure numeric (Date.now) temporary id
+          if (/^[0-9a-fA-F-]{20,36}$/.test(s) && s.indexOf('-') !== -1) return false;
+          return false;
+        } catch (e) { return true; }
+      };
+
+      if (isTempId(payload.id)) {
+        // Create a server course first (POST) and capture the new id
+        try {
+          const postUrl = apiUrl.split('?')[0] + (apiUrl.includes('?') ? '?userId=smoke_user' : '?userId=smoke_user');
+          const createBody = { name: payload.name || payload.title || 'Untitled', code: payload.code || '', semester: payload.semester || '' };
+          const postRes = await fetch(postUrl, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(createBody) });
+          if (postRes && postRes.ok) {
+            const postJs = await postRes.json().catch(() => null);
+            if (postJs && postJs.data && postJs.data.id) {
+              payload.id = postJs.data.id;
+            }
+          }
+        } catch (e) { /* ignore and continue with original id */ }
+      }
+
+      const res = await fetch(apiUrl, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ courseId: payload.id, course: payload }) });
       if (!res.ok) throw new Error('Save failed');
       const js = await res.json();
-      // locally compute the course grade and return updated object
-      const updated = { ...payload, _computedGrade: calculateCourseGrade(payload.assessments) };
+
+      // Try to obtain authoritative assessments returned by the API. The Prisma
+      // branch returns { success: true, data: { id: courseId, assessments: [...] } }
+      let serverCourse = null;
+      try {
+        // If PUT returned the updated assessments, use them
+        if (js && js.data && js.data.assessments) {
+          serverCourse = { ...payload, assessments: js.data.assessments };
+        } else {
+          // Otherwise re-fetch grades list (use same userId fallback) and pick the course
+          const listRes = await fetch(apiUrl.replace('?userId=smoke_user','?userId=smoke_user'));
+          if (listRes && listRes.ok) {
+            const listJs = await listRes.json().catch(() => null);
+            const arr = listJs && Array.isArray(listJs.data) ? listJs.data : (listJs && Array.isArray(listJs) ? listJs : []);
+            const found = arr.find(c => String(c.id) === String(payload.id));
+            if (found) serverCourse = found;
+          }
+        }
+      } catch (e) { /* ignore */ }
+
+      const updated = serverCourse ? { ...serverCourse, _computedGrade: calculateCourseGrade(serverCourse.assessments || payload.assessments || []) } : { ...payload, _computedGrade: calculateCourseGrade(payload.assessments) };
       onSaved && onSaved(updated);
       onClose && onClose();
     } catch (e) {

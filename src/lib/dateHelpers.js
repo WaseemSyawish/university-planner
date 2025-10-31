@@ -11,6 +11,27 @@ export function parseDatePreserveLocal(input) {
     const s = String(input);
     // If it looks like YYYY-MM-DDTHH:mm (no timezone), treat as local
     if (/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/.test(s)) return new Date(s + ':00');
+    // If it looks like an ISO instant ending with Z (e.g. 2025-10-04T09:00:00.000Z)
+    // and the server intentionally emitted a UTC instant for a local y/m/d hh:mm,
+    // treat it as local by extracting the local components instead of letting
+    // the Date parser convert from UTC to local (which causes off-by-one-day shifts).
+    const isoZ = s.match(/^(\d{4}-\d{2}-\d{2})T(\d{2}):(\d{2})(?::\d{2}(?:\.\d+)?)?Z$/);
+    if (isoZ) {
+      try {
+        const datePart = isoZ[1];
+        const hh = Number(isoZ[2]);
+        const mm = Number(isoZ[3]);
+        const m = datePart.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+        if (m) {
+          const y = Number(m[1]);
+          const mo = Number(m[2]) - 1;
+          const d = Number(m[3]);
+          return new Date(y, mo, d, hh, mm, 0);
+        }
+      } catch (e) {
+        // fall through to default parsing below
+      }
+    }
     const dt = new Date(input);
     if (!isNaN(dt.getTime())) return dt;
     return null;
