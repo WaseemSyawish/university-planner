@@ -289,6 +289,10 @@ const GradesPage = () => {
         // update state so render can apply inline styles
         setIsDark(!!darkNow);
 
+        // We'll dynamically read the computed styles from the Type CustomSelect's inner button
+        // so other inputs copy the exact visual (including focus-specific outlines).
+        const csElem = (typeof document !== 'undefined') ? document.getElementById('grades-cat-type') : null;
+
         const setColor = (el) => {
           if (!el) return;
           if (darkNow) {
@@ -297,20 +301,38 @@ const GradesPage = () => {
               el.style.color = '#ffffff';
               el.style.caretColor = '#ffffff';
               el.style.textShadow = '0 0 1px rgba(255,255,255,0.02)';
-              // WebKit-specific property (may be needed for autofill / Chromium rendering)
               el.style.WebkitTextFillColor = '#ffffff';
-              // Subtle outline / focus ring fallback (less bright, less thick)
-              el.style.boxShadow = '0 0 0 2px rgba(255,255,255,0.04)';
-              el.style.borderColor = 'rgba(255,255,255,0.12)';
 
-              // Also set with priority to override UA styles (use setProperty with 'important')
+              // Recompute the Type control's visible outline/box-shadow now (handles focus changes)
+              let csBoxShadow = '0 0 0 2px rgba(255,255,255,0.04)';
+              let csBorderColor = 'rgba(255,255,255,0.12)';
+              let csOutline = '1px solid rgba(255,255,255,0.45)';
+              try {
+                const csButton = csElem ? (csElem.querySelector('button[aria-haspopup]') || csElem.querySelector('button')) : null;
+                const source = csButton || csElem;
+                if (source) {
+                  const comp = window.getComputedStyle(source);
+                  if (comp) {
+                    if (comp.boxShadow) csBoxShadow = comp.boxShadow || csBoxShadow;
+                    if (comp.borderColor) csBorderColor = comp.borderColor || csBorderColor;
+                    if (comp.outline) csOutline = comp.outline || csOutline;
+                  }
+                }
+              } catch (e) {}
+
+              // Apply the computed values to match Type control exactly
+              el.style.boxShadow = csBoxShadow;
+              el.style.borderColor = csBorderColor;
+              el.style.outline = csOutline;
+
+              // Also set with priority to override UA/autofill styles
               el.style.setProperty('color', '#ffffff', 'important');
               el.style.setProperty('-webkit-text-fill-color', '#ffffff', 'important');
               el.style.setProperty('caret-color', '#ffffff', 'important');
               el.style.setProperty('text-shadow', '0 0 1px rgba(255,255,255,0.02)', 'important');
-              el.style.setProperty('box-shadow', '0 0 0 2px rgba(255,255,255,0.04)', 'important');
-              el.style.setProperty('border-color', 'rgba(255,255,255,0.12)', 'important');
-              el.style.setProperty('outline', '1px solid rgba(255,255,255,0.45)', 'important');
+              el.style.setProperty('box-shadow', csBoxShadow, 'important');
+              el.style.setProperty('border-color', csBorderColor, 'important');
+              el.style.setProperty('outline', csOutline, 'important');
             } catch (e) {}
           } else {
             try {
@@ -320,6 +342,7 @@ const GradesPage = () => {
               el.style.WebkitTextFillColor = '';
               el.style.boxShadow = '';
               el.style.borderColor = '';
+              el.style.outline = '';
               el.style.removeProperty('color');
               el.style.removeProperty('-webkit-text-fill-color');
               el.style.removeProperty('caret-color');
@@ -364,6 +387,13 @@ const GradesPage = () => {
           if (cs) {
             cs.addEventListener('focusin', () => setColor(cs));
             cs.addEventListener('click', () => setColor(cs));
+            try {
+              const csBtn = cs.querySelector('button[aria-haspopup]') || cs.querySelector('button');
+              if (csBtn) {
+                csBtn.addEventListener('focus', () => setColor(csBtn));
+                csBtn.addEventListener('click', () => setColor(csBtn));
+              }
+            } catch (e) {}
           }
         } catch (e) {}
       } catch (e) {}

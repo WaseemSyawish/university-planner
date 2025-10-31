@@ -212,11 +212,26 @@ export default async function handler(req, res) {
           // prefer explicit time if present
           const dateVal = out.date || out.start_date || out.created_at || null;
           if (dateVal) {
-            const dt = new Date(String(dateVal));
+            // Parse dateVal carefully: prefer parsing YYYY-MM-DD as a local date
+            // to avoid cross-environment differences in Date parsing semantics
+            // (some engines treat date-only strings as UTC which can shift the day).
+            let dt = null;
+            try {
+              const sVal = String(dateVal);
+              if (/^\d{4}-\d{2}-\d{2}$/.test(sVal)) {
+                const parts = sVal.split('-').map(Number);
+                // parts: [year, month, day]
+                dt = new Date(parts[0], (parts[1] || 1) - 1, parts[2] || 1);
+              } else {
+                dt = new Date(sVal);
+              }
+            } catch (e) {
+              dt = new Date(String(dateVal));
+            }
             if (!isNaN(dt.getTime())) {
-              const y = dt.getFullYear();
-              const m = dt.getMonth();
-              const day = dt.getDate();
+                const y = dt.getFullYear();
+                const m = dt.getMonth();
+                const day = dt.getDate();
               // time may be stored separately on the row as `time` or `startTime`
               let hh = 0, mm = 0;
               try {
