@@ -212,6 +212,9 @@ export default async function handler(req, res) {
           // prefer explicit time if present
           const dateVal = out.date || out.start_date || out.created_at || null;
           if (dateVal) {
+            // If the row already exposes a startDate (for example a client-provided
+            // ISO or previously-attached synthetic value), do not overwrite it here.
+            if (!out.startDate) {
             // Parse dateVal carefully: prefer parsing YYYY-MM-DD as a local date
             // to avoid cross-environment differences in Date parsing semantics
             // (some engines treat date-only strings as UTC which can shift the day).
@@ -228,7 +231,7 @@ export default async function handler(req, res) {
             } catch (e) {
               dt = new Date(String(dateVal));
             }
-            if (!isNaN(dt.getTime())) {
+      if (!isNaN(dt.getTime())) {
                 const y = dt.getFullYear();
                 const m = dt.getMonth();
                 const day = dt.getDate();
@@ -242,13 +245,16 @@ export default async function handler(req, res) {
                   mm = Number.isFinite(parts[1]) ? parts[1] : 0;
                 }
               } catch (e) {}
-              // Build a UTC instant for the local y/m/d hh:mm
+              // Build an ISO instant representing the local y/m/d hh:mm. Use the
+              // local Date constructor so the HH:MM represents the wall-clock
+              // time intended by the client (avoid treating the components as UTC).
               try {
-                const iso = new Date(Date.UTC(y, m, day, hh, mm, 0)).toISOString();
+                const iso = new Date(y, m, day, hh, mm, 0).toISOString();
                 out.startDate = iso;
               } catch (e) {
                 out.startDate = (new Date(String(dateVal))).toISOString();
               }
+            }
             }
           }
 
@@ -299,6 +305,23 @@ export default async function handler(req, res) {
   try {
     console.info('[api/events] parsed times -> start:', dt && dt.toISOString ? dt.toISOString() : String(dt), 'provided endDate:', req.body && req.body.endDate ? String(req.body.endDate) : null, 'durationMinutes:', typeof durationMinutes !== 'undefined' ? String(durationMinutes) : null);
   } catch (e) {}
+  // If client provided an explicit ISO `startDate`, prefer that when
+  // persisting. This lets clients compute the correct instant (with their
+  // local timezone) and avoid server-side timezone assumptions.
+  let clientStartIso = null;
+  let clientStartDateObj = null;
+  try {
+    if (req.body && req.body.startDate) {
+      const tmp = new Date(String(req.body.startDate));
+      if (!isNaN(tmp.getTime())) {
+        clientStartIso = tmp.toISOString();
+        clientStartDateObj = tmp;
+      }
+    }
+  } catch (e) { /* ignore */ }
+  const chosenDateObj = clientStartDateObj || dt;
+  const pad = (n) => String(n).padStart(2, '0');
+  const chosenTimeStr = clientStartDateObj ? `${pad(clientStartDateObj.getHours())}:${pad(clientStartDateObj.getMinutes())}` : (time || null);
   // normalize room -> location
   const location = req.body && (req.body.location || req.body.room) ? (req.body.location || req.body.room) : null;
       if (date && isBeforeTodayLocal(dt)) {
@@ -702,8 +725,8 @@ export default async function handler(req, res) {
           const createData = {
             title,
             type: type || 'assignment',
-            date: localDateOnlyString(dt),
-            time: time || null,
+            date: localDateOnlyString(chosenDateObj),
+            time: chosenTimeStr,
             description: finalDescription,
             color: req.body && req.body.color ? String(req.body.color) : null,
             user_id: resolvedUserId ? String(resolvedUserId) : null
@@ -731,8 +754,8 @@ export default async function handler(req, res) {
               const fallbackData = {
                 title,
                 type: type || 'assignment',
-                date: localDateOnlyString(dt),
-                time: time || null,
+                date: localDateOnlyString(chosenDateObj),
+                time: chosenTimeStr,
                 description: finalDescription,
                 color: req.body && req.body.color ? String(req.body.color) : null,
                 user_id: resolvedUserId ? String(resolvedUserId) : null
@@ -764,8 +787,8 @@ export default async function handler(req, res) {
                 created = await prisma.event.create({ data: {
                   title,
                   type: type || 'assignment',
-                  date: localDateOnlyString(dt),
-                  time: time || null,
+                  date: localDateOnlyString(chosenDateObj),
+                  time: chosenTimeStr,
                   description: descriptionWithMeta,
                   color: req.body && req.body.color ? String(req.body.color) : null,
                   user_id: resolvedUserId ? String(resolvedUserId) : null
@@ -843,6 +866,10 @@ export default async function handler(req, res) {
     } catch (e) { /* swallow */ }
     // normalize date to local date-only string
     if (ret && ret.date) ret.date = localDateOnlyString(ret.date);
+    // Preserve client-provided startDate ISO on the response when available
+    if (clientStartIso) {
+      try { ret.startDate = clientStartIso; } catch (e) {}
+    }
     // If we had meta in the incoming body but the DB did not support meta,
     // we may have attached it as a fallback; ensure the API response includes it
     if (!ret.meta && metaToStore) {
@@ -862,6 +889,9 @@ export default async function handler(req, res) {
     } catch (ee) { /* swallow */ }
     if (!fallback.meta && metaToStore) {
       try { fallback.meta = metaToStore; } catch (e) {}
+    }
+    if (clientStartIso) {
+      try { fallback.startDate = clientStartIso; } catch (e) {}
     }
     return res.status(201).json({ event: fallback });
   }
