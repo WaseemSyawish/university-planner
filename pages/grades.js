@@ -542,14 +542,24 @@ const GradesPage = () => {
         <title>Grades — University Planner</title>
       </Head>
       <style dangerouslySetInnerHTML={{__html: `
-        /* Force bright white for specific modal inputs in dark mode */
-        #grades-cat-name,
-        #grades-cat-type,
-        #grades-item-name {
+        /* Modal form text coloring: keep white in dark mode, black in light mode */
+        .dark #grades-cat-name,
+        .dark #grades-cat-type,
+        .dark #grades-item-name {
           color: #ffffff !important;
           -webkit-text-fill-color: #ffffff !important;
           caret-color: #ffffff !important;
           text-shadow: 0 0 1px rgba(255,255,255,0.03) !important;
+        }
+
+        /* Ensure explicit black text in light mode so overlays/components with stronger CSS don't force another color */
+        :not(.dark) #grades-cat-name,
+        :not(.dark) #grades-cat-type,
+        :not(.dark) #grades-item-name {
+          color: #000000 !important;
+          -webkit-text-fill-color: #000000 !important;
+          caret-color: #000000 !important;
+          text-shadow: none !important;
         }
 
         /* Make placeholder text darker grey for modal forms (all inputs/selects/textareas inside modal overlays) */
