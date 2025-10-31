@@ -75,6 +75,7 @@ export default function CalendarPage() {
   const [pendingEventId, setPendingEventId] = useState(null);
   const [showDeleteScopeModal, setShowDeleteScopeModal] = useState(false);
   const [pendingDeleteId, setPendingDeleteId] = useState(null);
+  const [pendingDeleteEvent, setPendingDeleteEvent] = useState(null);
   const [newEvent, setNewEvent] = useState({ title: '', date: toYMD(new Date()), startTime: '', endTime: '', type: 'event', location: '', description: '', color: 'bg-blue-500' });
   const gridRef = useRef(null);
   const createBtnRef = useRef(null);
@@ -180,57 +181,190 @@ export default function CalendarPage() {
     setShowEditScopeModal(false);
     try {
       if (!pendingSavePayload || !pendingEventId) return;
-      const ev = selectedEvent || events.find(e => e.id === pendingEventId) || {};
-      const tplId = ev.template_id || (ev.raw && (ev.raw.template_id || ev.raw.templateId)) || null;
-      if (scope === 'single' || !tplId) {
-        const res = await fetch(`/api/events/${pendingEventId}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(pendingSavePayload) });
+      const ev = selectedEvent || events.find(e => String(e.id) === String(pendingEventId)) || {};
+      let tplId = ev.template_id || (ev.raw && (ev.raw.template_id || ev.raw.templateId)) || null;
+
+      // If single, do a single-item patch immediately
+      if (scope === 'single') {
+        const res = await fetch(`/api/events/${encodeURIComponent(pendingEventId)}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(pendingSavePayload) });
         if (!res.ok) throw new Error('Update failed');
-        const json = await res.json().catch(() => null);
-        const updated = json?.event || json;
-        setEvents(prev => prev.map(ev => ev.id === pendingEventId ? { ...ev, title: updated?.title || ev.title, date: updated?.date || ev.date, startTime: updated?.time || ev.startTime, location: updated?.location || ev.location, description: updated?.description || ev.description } : ev));
       } else {
-        // future/all: fetch events list and patch matching events
-        const list = await fetch('/api/events').then(r => r.ok ? r.json().catch(() => null) : null);
-        const eventsList = Array.isArray(list?.events) ? list.events : (Array.isArray(list) ? list : []);
-        const rawBase = ev.date || (ev.raw && ev.raw.date) || ev.startDate || null;
-        const baseDate = rawBase ? (parseDatePreserveLocal(rawBase) || buildLocalDateFromParts(String(rawBase).slice(0,10)) || new Date(String(rawBase))) : null;
-        const toPatch = eventsList.filter(ei => {
-          const evTpl = ei && (ei.template_id || (ei.raw && (ei.raw.template_id || ei.raw.templateId))) || null;
-          if (!evTpl || String(evTpl) !== String(tplId)) return false;
-          return true;
-        });
-        for (const p of toPatch) {
-          try { await fetch(`/api/events/${encodeURIComponent(p.id)}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(pendingSavePayload) }); } catch (e) { console.warn('Bulk update failed for event', p && p.id, e); }
+        // For 'all' or 'future', try to discover template id if missing by fetching server record
+        if (!tplId) {
+          try {
+            const serverEvRes = await fetch(`/api/events/${encodeURIComponent(pendingEventId)}`);
+            if (serverEvRes && serverEvRes.ok) {
+              const payload = await serverEvRes.json().catch(() => null);
+              const serverEv = payload && payload.event ? payload.event : payload;
+              tplId = serverEv && (serverEv.template_id || (serverEv.raw && (serverEv.raw.template_id || serverEv.raw.templateId)) || serverEv.templateId) || null;
+            }
+          } catch (e) { tplId = tplId || null; }
         }
-        // refresh events
-        try {
-          const r = await fetch('/api/events');
-          if (r.ok) {
-            const pl = await r.json();
-            const listNorm = Array.isArray(pl?.events) ? pl.events : (Array.isArray(pl) ? pl : []);
-            const normalized = listNorm.map(e => ({
-              id: String(e.id),
-              title: e.title || pendingSavePayload.title,
-              date: e.date || pendingSavePayload.date,
-              startTime: e.time || '',
-              endTime: e.endTime || '',
-              type: e.type || 'event',
-              location: e.location || '',
-              description: e.description || '',
-              color: e.color || 'bg-secondary',
-              template_id: e.template_id || e.templateId || null,
-              repeatOption: e.repeatOption || e.repeat_option || null,
-              raw: e
-            }));
-            const preserved = (events || []).filter(ev => String(ev.id).startsWith('tmp-'));
-            setEvents([...normalized, ...preserved]);
+
+        // If we have a template id, prefer server-side scoped PATCH and include templateId
+        if (tplId) {
+          const qs = `scope=${encodeURIComponent(scope)}${tplId ? `&templateId=${encodeURIComponent(tplId)}` : ''}`;
+          const url = `/api/events/${encodeURIComponent(pendingEventId)}?${qs}`;
+          const res = await fetch(url, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(pendingSavePayload) });
+          let resJson = null;
+          try { resJson = await res.json().catch(() => null); } catch (e) { resJson = null; }
+          try { console.debug('[calendar] server scoped PATCH response', { ok: res.ok, status: res.status, body: resJson }); } catch (e) {}
+          if (!res.ok) {
+            console.warn('Server scoped update failed (%s), falling back to client bulk update', res.status);
+            // fall through to client-side bulk apply below
+          } else {
+            // server succeeded; inspect response and, if it updated only one row,
+            // perform client-side bulk fallback similar to delete behavior.
+            try {
+              const bodyJson = resJson || null;
+              const details = bodyJson && (bodyJson.details || bodyJson) ? (bodyJson.details || bodyJson) : null;
+              const updatedCount = (details && (Number(details.updatedActive || 0) + Number(details.updatedArchived || 0))) || 0;
+              if (updatedCount <= 1) {
+                console.warn('[calendar] server-side series update changed <=1 rows, running client-side bulk fallback');
+                try {
+                  const listResp = await fetch('/api/events');
+                  const listJson = listResp && listResp.ok ? await listResp.json().catch(() => null) : null;
+                  const eventsList = Array.isArray(listJson?.events) ? listJson.events : (Array.isArray(listJson) ? listJson : []);
+
+                  const normalize = (s) => (s || '').toString().trim().toLowerCase();
+                  const tplIdLocal = tplId;
+                  const targetTitle = normalize(ev && ev.title ? ev.title : '');
+                  const targetTime = (ev && ev.time) ? String(ev.time).slice(0,2) : null;
+
+                  const toPatch = eventsList.filter((e) => {
+                    try {
+                      const evTpl = e && (e.template_id || (e.raw && (e.raw.template_id || e.raw.templateId))) || null;
+                      if (tplIdLocal && evTpl && String(evTpl) === String(tplIdLocal)) return true;
+                      try {
+                        const meta = e && e.meta ? e.meta : (e.raw && e.raw.meta ? e.raw.meta : null);
+                        if (meta && (meta.repeatOption || meta.repeat_option || meta.repeatoption) && ev && (ev.repeatOption || (ev.raw && ev.raw.repeatOption))) {
+                          const targ = String(ev.repeatOption || (ev.raw && ev.raw.repeatOption) || '').trim();
+                          const candidate = String(meta.repeatOption || meta.repeat_option || meta.repeatoption || '').trim();
+                          if (targ && candidate && String(targ) === String(candidate)) return true;
+                        }
+                      } catch (e) {}
+                      try {
+                        const desc = e.description || (e.raw && e.raw.description) || '';
+                        const m = String(desc).match(/\[META\]([\s\S]*?)\[META\]/);
+                        if (m && m[1]) {
+                          try { const parsed = JSON.parse(m[1]); if (parsed && parsed.template_id && tplIdLocal && String(parsed.template_id) === String(tplIdLocal)) return true; } catch (e) {}
+                        }
+                      } catch (e) {}
+                      const sameTitle = targetTitle && normalize(e.title || e.subject || '') === targetTitle;
+                      if (!sameTitle) return false;
+                      if (targetTime) {
+                        const eTime = e.time || e.startTime || e.start_time || (e.raw && (e.raw.time || e.raw.startTime || e.raw.start_time)) || null;
+                        if (!eTime) return false;
+                        return String(eTime).slice(0,2) === String(targetTime);
+                      }
+                      return true;
+                    } catch (er) { return false; }
+                  });
+
+                  try { console.debug('[calendar] client bulk fallback candidates:', toPatch.length, toPatch.map(x => x && x.id)); } catch (e) {}
+                  for (const p of toPatch) {
+                    try { await fetch(`/api/events/${encodeURIComponent(p.id)}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(pendingSavePayload) }); } catch (e) { console.warn('Bulk update failed for event', p && p.id, e); }
+                  }
+                  try {
+                    const r2 = await fetch('/api/events');
+                    if (r2.ok) {
+                      const pl = await r2.json();
+                      const listNorm = Array.isArray(pl?.events) ? pl.events : (Array.isArray(pl) ? pl : []);
+                      const preserved = (events || []).filter(ev => String(ev.id).startsWith('tmp-'));
+                      setEvents([...listNorm, ...preserved]);
+                    } else {
+                      // fallback to reload page
+                      try { if (typeof window !== 'undefined') window.location.reload(); } catch (e) {}
+                    }
+                  } catch (e) { try { if (typeof window !== 'undefined') window.location.reload(); } catch (ee) {} }
+                } catch (e) {
+                  console.warn('[calendar] client-side bulk fallback failed', e);
+                }
+              }
+            } catch (e) {
+              console.warn('[calendar] inspect response failed', e);
+            }
+            tplId = tplId; // keep tplId
           }
-        } catch (e) { /* ignore */ }
+        }
+
+        // If tplId is missing or server-side scoped PATCH failed, perform client-side bulk apply.
+        try {
+          const listResp = await fetch('/api/events');
+          const listJson = listResp && listResp.ok ? await listResp.json().catch(() => null) : null;
+          const eventsList = Array.isArray(listJson?.events) ? listJson.events : (Array.isArray(listJson) ? listJson : []);
+
+          // heuristics for matching series when template_id is not present:
+          // 1) events with same template_id (if any)
+          // 2) events whose embedded [META] json contains same template_id
+          // 3) events with same title and same time
+          const baseDateStr = ev.date || (ev.raw && ev.raw.date) || ev.startDate || null;
+          const baseYMD = baseDateStr ? toYMD(baseDateStr) : null;
+
+          const toPatch = eventsList.filter(ei => {
+            try {
+              const evTpl = ei && (ei.template_id || (ei.raw && (ei.raw.template_id || ei.raw.templateId))) || null;
+              if (tplId && evTpl && String(evTpl) === String(tplId)) return true;
+
+              // check embedded META JSON for template_id
+              try {
+                const desc = ei.description || (ei.raw && ei.raw.description) || '';
+                const m = String(desc).match(/\[META\]([\s\S]*?)\[META\]/);
+                if (m && m[1]) {
+                  try { const parsed = JSON.parse(m[1]); if (parsed && (parsed.template_id || parsed.templateId) && tplId && String(parsed.template_id || parsed.templateId) === String(tplId)) return true; } catch (e) {}
+                }
+              } catch (e) {}
+
+              // fallback: match by title and time
+              const titleMatch = pendingSavePayload && pendingSavePayload.title ? String(ei.title || ei.subject || '').trim() === String(pendingSavePayload.title).trim() : false;
+              const timeMatch = pendingSavePayload && pendingSavePayload.time ? String(ei.time || ei.startTime || ei.start_time || (ei.raw && (ei.raw.time || ei.raw.startTime || ei.raw.start_time)) || '').slice(0,5) === String(pendingSavePayload.time || '').slice(0,5) : false;
+              if (titleMatch && timeMatch) {
+                if (scope === 'future') {
+                  if (!baseYMD) return false;
+                  const candidateDate = ei.date || ei.startDate || ei.start_date || null;
+                  if (!candidateDate) return false;
+                  return toYMD(candidateDate) >= baseYMD;
+                }
+                return true;
+              }
+
+              return false;
+            } catch (e) { return false; }
+          });
+
+          for (const p of toPatch) {
+            try { await fetch(`/api/events/${encodeURIComponent(p.id)}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(pendingSavePayload) }); } catch (e) { console.warn('Bulk update failed for event', p && p.id, e); }
+          }
+        } catch (e) { console.warn('Fallback bulk update failed', e); }
       }
+
+      // Refresh authoritative list from server after scoped operation
+      try {
+        const r = await fetch('/api/events');
+        if (r.ok) {
+          const pl = await r.json();
+          const listNorm = Array.isArray(pl?.events) ? pl.events : (Array.isArray(pl) ? pl : []);
+          const normalized = listNorm.map(e => ({
+            id: String(e.id),
+            title: e.title || pendingSavePayload.title || 'Untitled',
+            date: (e.date && typeof e.date === 'string') ? (e.date.length >= 10 ? e.date.slice(0, 10) : e.date) : (e.date ? e.date : ''),
+            startTime: e.time || e.startTime || '',
+            endTime: e.endTime || '',
+            type: e.type || 'event',
+            location: e.location || '',
+            description: e.description || '',
+            color: (e.type === 'class' || e.type === 'lecture') ? 'bg-primary' : (e.type === 'deadline' ? 'bg-error' : 'bg-secondary'),
+            template_id: e.template_id || e.templateId || null,
+            repeatOption: e.repeatOption || e.repeat_option || null,
+            raw: e
+          }));
+          const preserved = (events || []).filter(ev => String(ev.id).startsWith('tmp-'));
+          setEvents([...normalized, ...preserved]);
+        }
+      } catch (e) { /* ignore refresh errors */ }
     } catch (e) {
       console.warn('Scope update failed', e);
       showToast('Update failed', 'error');
-      // reload or rollback could be added here
     } finally {
       setPendingSavePayload(null);
       setPendingEventId(null);
@@ -694,7 +828,24 @@ export default function CalendarPage() {
 
         // If this event appears to be part of a series, show scope chooser
         const evAny = selectedEvent || {};
-        const tplId = evAny.template_id || (evAny.raw && (evAny.raw.template_id || evAny.raw.templateId)) || null;
+        // Try to discover template id from various places including embedded [META] JSON in description
+        const extractTplFromDescription = (obj) => {
+          try {
+            if (!obj) return null;
+            if (obj.template_id) return obj.template_id;
+            if (obj.templateId) return obj.templateId;
+            if (obj.raw && (obj.raw.template_id || obj.raw.templateId)) return obj.raw.template_id || obj.raw.templateId;
+            const desc = obj.description || (obj.raw && obj.raw.description) || '';
+            if (desc && typeof desc === 'string') {
+              const m = String(desc).match(/\[META\]([\s\S]*?)\[META\]/);
+              if (m && m[1]) {
+                try { const parsed = JSON.parse(m[1]); return parsed?.template_id || parsed?.templateId || null; } catch (e) { return null; }
+              }
+            }
+          } catch (e) { /* ignore */ }
+          return null;
+        };
+        const tplId = extractTplFromDescription(evAny) || null;
         const isSeries = !!(evAny && (evAny.repeatOption || tplId));
         if (isSeries) {
           // store pending state and show the EditScopeModal component
@@ -758,6 +909,7 @@ export default function CalendarPage() {
     if (isSeries) {
       // store pending id and show delete-scope chooser
       setPendingDeleteId(id);
+      setPendingDeleteEvent(target);
       setShowDeleteScopeModal(true);
       // show a visible toast so it's obvious in the UI that the scope chooser should open
       try { showToast(`Series event detected. Showing scope chooser (id=${id})`, 'info', 5000); } catch (e) { }
@@ -890,6 +1042,7 @@ export default function CalendarPage() {
       showToast('Delete failed', 'error');
     } finally {
       setPendingDeleteId(null);
+      setPendingDeleteEvent(null);
     }
   }
 
@@ -909,7 +1062,7 @@ export default function CalendarPage() {
               <p className="text-xs text-slate-700 dark:text-slate-300">Manage your schedule</p>
             </div>
             <EditScopeModal visible={showEditScopeModal} mode={'edit'} onClose={() => { setShowEditScopeModal(false); setPendingSavePayload(null); setPendingEventId(null); }} onConfirm={(scope) => handleScopeConfirm(scope)} />
-            <EditScopeModal visible={showDeleteScopeModal} mode={'delete'} onClose={() => { setShowDeleteScopeModal(false); setPendingDeleteId(null); }} onConfirm={(scope) => handleDeleteScopeConfirm(scope)} />
+            <EditScopeModal visible={showDeleteScopeModal} mode={'delete'} onClose={() => { setShowDeleteScopeModal(false); setPendingDeleteId(null); setPendingDeleteEvent(null); }} onConfirm={(scope) => handleDeleteScopeConfirm(scope)} />
           </div>
           <button ref={createBtnRef} onClick={handleTodayCreate} className="px-5 py-2 bg-gradient-to-r from-purple-600 to-purple-700 hover:from-purple-500 hover:to-purple-600 text-white rounded-lg text-sm font-medium transition-all duration-200 hover:shadow-lg hover:shadow-purple-500/30 flex items-center gap-2">
             <Plus className="w-4 h-4" />

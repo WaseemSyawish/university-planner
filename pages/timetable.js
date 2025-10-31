@@ -302,25 +302,171 @@ export default function TimetablePage() {
       // If this update should apply to the whole series/template, prefer updating the template
       // If event.raw contains a template id, use the timetable API to update the template when scope==='all'
       try {
-        const tplId = event && event.raw && (event.raw.template_id || event.raw.templateId) ? (event.raw.template_id || event.raw.templateId) : null;
+        let tplId = event && event.raw && (event.raw.template_id || event.raw.templateId) ? (event.raw.template_id || event.raw.templateId) : null;
+        // If tplId is missing, try fetching server copy to discover template linkage
+        if (!tplId && event && event.id) {
+          try {
+            const serverEvRes = await fetch(`/api/events/${encodeURIComponent(event.id)}`);
+            if (serverEvRes && serverEvRes.ok) {
+              const payload = await serverEvRes.json().catch(() => null);
+              const serverEv = payload && payload.event ? payload.event : payload;
+              tplId = serverEv && (serverEv.template_id || (serverEv.raw && (serverEv.raw.template_id || serverEv.raw.templateId)) || serverEv.templateId) || null;
+            }
+          } catch (e) { /* ignore */ }
+        }
+
         if (scope === 'all' && tplId) {
-          // Build a template-like payload. Keep minimal fields; server-side template PUT will merge.
+          // Instead of only updating the template record, call the events API
+          // with scope=all so materialized occurrences are updated too.
           const tplBody = {
             title: body.title,
             description: body.description,
             repeatOption: event.repeatOption || (event.raw && event.raw.repeatOption) || null,
             meta: event.meta || (event.raw && event.raw.meta) || null,
           };
-          const resTpl = await fetch(`/api/timetable/${encodeURIComponent(tplId)}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(tplBody) });
-          if (!resTpl.ok) {
-            const txt = await resTpl.text().catch(() => null);
-            throw new Error(`Template update failed ${resTpl.status}: ${txt}`);
+          const url = `/api/events/${encodeURIComponent(id)}?scope=all${tplId ? `&templateId=${encodeURIComponent(tplId)}` : ''}`;
+          const resEvents = await fetch(url, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(tplBody) });
+          let resEventsJson = null;
+          try { resEventsJson = await resEvents.json().catch(() => null); } catch (e) { resEventsJson = null; }
+          try { console.debug('[timetable] server scoped PATCH response', { ok: resEvents.ok, status: resEvents.status, body: resEventsJson }); } catch (e) {}
+          if (!resEvents.ok) {
+            const txt = await resEvents.text().catch(() => null);
+            throw new Error(`Series update failed ${resEvents.status}: ${txt}`);
+          }
+
+          // If server reports it only updated one row, run a client-side bulk
+          // fallback that aggressively matches and patches every occurrence.
+          try {
+            const details = resEventsJson && (resEventsJson.details || resEventsJson) ? (resEventsJson.details || resEventsJson) : null;
+            const updatedCount = (details && (Number(details.updatedActive || 0) + Number(details.updatedArchived || 0))) || 0;
+            if (updatedCount <= 1) {
+              console.warn('[timetable] server-side series update changed <=1 rows, running client-side bulk fallback');
+              // Get authoritative list
+              const list = await fetch('/api/events').then(r => r.ok ? r.json().catch(() => null) : null);
+              const eventsList = Array.isArray(list?.events) ? list.events : (Array.isArray(list) ? list : []);
+
+              // Relaxed matching: case-insensitive title, meta.repeatOption, embedded META, hour-only time match
+              const normalize = (s) => (s || '').toString().trim().toLowerCase();
+              const tplIdLocal = tplId;
+              const targetTitle = normalize(event && event.title ? event.title : '');
+              const targetTime = (event && event.time) ? String(event.time).slice(0,2) : null; // hour-only
+
+              const toPatch = eventsList.filter(ev => {
+                try {
+                  const evTpl = ev && (ev.template_id || (ev.raw && (ev.raw.template_id || ev.raw.templateId))) || null;
+                  if (tplIdLocal && evTpl && String(evTpl) === String(tplIdLocal)) return true;
+
+                  // meta.repeatOption match
+                  try {
+                    const meta = ev && ev.meta ? ev.meta : (ev.raw && ev.raw.meta ? ev.raw.meta : null);
+                    if (meta && (meta.repeatOption || meta.repeat_option || meta.repeatoption) && event && (event.repeatOption || (event.raw && event.raw.repeatOption))) {
+                      const targ = String(event.repeatOption || (event.raw && event.raw.repeatOption) || '').trim();
+                      const candidate = String(meta.repeatOption || meta.repeat_option || meta.repeatoption || '').trim();
+                      if (targ && candidate && String(targ) === String(candidate)) return true;
+                    }
+                  } catch (e) {}
+
+                  // embedded META in description
+                  try {
+                    const desc = ev.description || (ev.raw && ev.raw.description) || '';
+                    const m = String(desc).match(/\[META\]([\s\S]*?)\[META\]/);
+                    if (m && m[1]) {
+                      try { const parsed = JSON.parse(m[1]); if (parsed && parsed.template_id && tplIdLocal && String(parsed.template_id) === String(tplIdLocal)) return true; } catch (e) {}
+                    }
+                  } catch (e) {}
+
+                  // title + hour match fallback
+                  try {
+                    const sameTitle = targetTitle && normalize(ev.title || ev.subject || '') === targetTitle;
+                    if (!sameTitle) return false;
+                    if (targetTime) {
+                      const evTime = ev.time || ev.startTime || ev.start_time || (ev.raw && (ev.raw.time || ev.raw.startTime || ev.raw.start_time)) || null;
+                      if (!evTime) return false;
+                      return String(evTime).slice(0,2) === String(targetTime);
+                    }
+                    return true;
+                  } catch (e) { return false; }
+                } catch (e) { return false; }
+              });
+
+              console.debug('[timetable] client bulk fallback candidates:', toPatch.length, toPatch.map(x => x && x.id));
+              for (const ev of toPatch) {
+                try {
+                  const patchBody = {
+                    title: event.title,
+                    description: event.description,
+                    time: event.time,
+                    date: event.date || event.startDate || undefined,
+                    meta: event.meta || (event.raw && event.raw.meta) || undefined
+                  };
+                  await fetch(`/api/events/${encodeURIComponent(ev.id)}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(patchBody) });
+                } catch (e) { console.warn('client bulk patch failed for', ev && ev.id, e); }
+              }
+              await reloadEvents();
+              return null;
+            }
+          } catch (e) {
+            console.warn('[timetable] client-side bulk fallback failed', e);
           }
           await reloadEvents();
           return null;
         }
       } catch (e) {
         console.warn('Failed to update template for all-scope edit, falling back to per-event update', e);
+      }
+
+      // If scope==='all' but tplId is missing (or updating template failed), attempt client-side bulk update
+      if (scope === 'all') {
+        try {
+          // discover tplId again from server if possible
+          let tplId = event && event.raw && (event.raw.template_id || event.raw.templateId) ? (event.raw.template_id || event.raw.templateId) : null;
+          if (!tplId && event && event.id) {
+            try {
+              const serverEvRes = await fetch(`/api/events/${encodeURIComponent(event.id)}`);
+              if (serverEvRes && serverEvRes.ok) {
+                const payload = await serverEvRes.json().catch(() => null);
+                const serverEv = payload && payload.event ? payload.event : payload;
+                tplId = serverEv && (serverEv.template_id || (serverEv.raw && (serverEv.raw.template_id || serverEv.raw.templateId)) || serverEv.templateId) || null;
+              }
+            } catch (e) { /* ignore */ }
+          }
+
+          const list = await fetch('/api/events').then(r => r.ok ? r.json().catch(() => null) : null);
+          const eventsList = Array.isArray(list?.events) ? list.events : (Array.isArray(list) ? list : []);
+
+          const toPatch = eventsList.filter(ev => {
+            try {
+              const evTpl = ev && (ev.template_id || (ev.raw && (ev.raw.template_id || ev.raw.templateId))) || null;
+              if (tplId && evTpl && String(evTpl) === String(tplId)) return true;
+
+              // check embedded META JSON for template_id
+              try {
+                const desc = ev.description || (ev.raw && ev.raw.description) || '';
+                const m = String(desc).match(/\[META\]([\s\S]*?)\[META\]/);
+                if (m && m[1]) {
+                  try { const parsed = JSON.parse(m[1]); if (parsed && parsed.template_id && tplId && String(parsed.template_id) === String(tplId)) return true; } catch (e) {}
+                }
+              } catch (e) {}
+
+              // fallback: match by title and time
+              const titleMatch = event && event.title ? String(ev.title || ev.subject || '').trim() === String(event.title).trim() : false;
+              const timeMatch = event && event.time ? String(ev.time || ev.startTime || ev.start_time || (ev.raw && (ev.raw.time || ev.raw.startTime || ev.raw.start_time)) || '').slice(0,5) === String(event.time || '').slice(0,5) : false;
+              return titleMatch && timeMatch;
+            } catch (e) { return false; }
+          });
+
+          try { console.debug('[timetable] bulk update candidates:', toPatch.length, toPatch.map((x) => x && x.id)); } catch (e) {}
+          for (const ev of toPatch) {
+            try {
+              const resp = await fetch(`/api/events/${encodeURIComponent(ev.id)}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+              try { console.debug('[timetable] PATCH', ev && ev.id, 'status', resp && resp.status); } catch (e) {}
+            } catch (e) { console.warn('Bulk patch failed for', ev && ev.id, e); }
+          }
+          await reloadEvents();
+          return null;
+        } catch (e) {
+          console.warn('Client-side bulk update failed for all-scope', e);
+        }
       }
 
       // For 'future' scope: update all materialized events with same template_id and date >= base date

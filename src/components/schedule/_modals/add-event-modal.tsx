@@ -109,6 +109,7 @@ export default function AddEventModal({
   const [submitting, setSubmitting] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
   const [showEditScope, setShowEditScope] = useState(false);
+  const [forceClientBulk, setForceClientBulk] = useState(false);
   const [pendingSave, setPendingSave] = useState(false);
   const [pendingBody, setPendingBody] = useState<any>(null);
   const [selectedByDays, setSelectedByDays] = useState<number[]>([]);
@@ -193,7 +194,7 @@ export default function AddEventModal({
   };
 
   // Helper: apply pending body to chosen scope (moved to component scope so modal can call it)
-  async function applyPendingBody(scope: string) {
+  async function applyPendingBody(scope: string, options: { forceClient?: boolean } = {}) {
     if (!eventData || !pendingBody) return;
     try {
       setSubmitting(true);
@@ -229,37 +230,298 @@ export default function AddEventModal({
         return;
       }
 
-      // For 'future' and 'all', fetch all events and patch those matching template
+      // For 'future' and 'all', first try provider/server-side scoped update when available.
+      try {
+        // If caller requested to force client-side bulk update, skip provider path
+        if (!options.forceClient && handlers && typeof handlers.handleUpdateEvent === 'function') {
+          // Call provider handler and let it decide how to persist/refresh.
+          let handlerErr = null;
+          try {
+            await handlers.handleUpdateEvent(pendingBody as any, eventData.id, scope === 'all' ? 'all' : scope === 'future' ? 'future' : undefined);
+          } catch (he) {
+            handlerErr = he;
+            console.warn('handlers.handleUpdateEvent(scope) failed, will attempt server force or client fallback', he);
+          }
+
+          // For series updates ('all'/'future') attempt a server-side preview
+          // to show how many materialized occurrences will be affected, then
+          // ask the user to confirm before applying the server-scoped PATCH.
+          if ((scope === 'all' || scope === 'future')) {
+            try {
+              const qPreview = `?scope=${scope === 'all' ? 'all' : 'future'}&preview=true`;
+              const previewUrl = `/api/events/${encodeURIComponent(eventData.id)}${qPreview}` + (tplId ? `&templateId=${encodeURIComponent(tplId)}` : '');
+              const previewResp = await fetch(previewUrl, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(pendingBody) });
+              if (previewResp && previewResp.ok) {
+                const pj = await previewResp.json().catch(() => null);
+                const activeCount = pj?.details?.candidateActiveIds?.length || 0;
+                const archivedCount = pj?.details?.candidateArchivedIds?.length || 0;
+                const total = activeCount + archivedCount;
+                if (total > 0) {
+                  const proceed = window.confirm(`About to update ${total} events in this series. Click OK to apply to all occurrences, or Cancel to abort.`);
+                  if (proceed) {
+                    const q = `?scope=${scope === 'all' ? 'all' : 'future'}` + (tplId ? `&templateId=${encodeURIComponent(tplId)}` : '');
+                    const applyUrl = `/api/events/${encodeURIComponent(eventData.id)}${q}`;
+                    const applyResp = await fetch(applyUrl, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(pendingBody) });
+                    if (applyResp && applyResp.ok) {
+                      handlers.handleLocalUpdateEvent?.({ ...(eventData as any), ...(pendingBody || {}) } as any);
+                      setPendingBody(null);
+                      setPendingSave(false);
+                      setShowEditScope(false);
+                      setClose();
+                      return;
+                    }
+                  } else {
+                    // User cancelled the preview/apply flow
+                    setSubmitting(false);
+                    return;
+                  }
+                } else {
+                  // No candidates found on server; fall through to client heuristics
+                }
+              }
+            } catch (se) {
+              console.warn('[AddEventModal] server preview/apply attempt failed, will continue to client fallback', se);
+            }
+          } else {
+            // For single-scope, let provider/local update
+            if (handlerErr === null && scope === 'single') {
+              handlers.handleLocalUpdateEvent?.({ ...(eventData as any), ...(pendingBody || {}) } as any);
+              setPendingBody(null);
+              setPendingSave(false);
+              setShowEditScope(false);
+              setClose();
+              return;
+            }
+          }
+        }
+      } catch (e) {
+        console.warn('handlers.handleUpdateEvent(scope) unexpected error, falling back to client bulk apply', e);
+      }
+
+      // If provider didn't handle it (or failed), attempt to discover template id (server-side) and then apply client-side bulk update using heuristics.
+      let discoveredTpl: string | null = tplId;
+      if (!discoveredTpl) {
+        try {
+          const serverEvRes = await fetch(`/api/events/${encodeURIComponent(eventData.id)}`);
+          if (serverEvRes && serverEvRes.ok) {
+            const payload = await serverEvRes.json().catch(() => null);
+            const serverEv = payload && payload.event ? payload.event : payload;
+            discoveredTpl = serverEv && (serverEv.template_id || (serverEv.raw && (serverEv.raw.template_id || serverEv.raw.templateId)) || serverEv.templateId) || null;
+          }
+        } catch (e) { /* ignore */ }
+      }
+
+      // Before attempting client-side heuristics, ask the server to preview
+      // which events would be affected; prompt the user to confirm before
+      // applying a server-scoped PATCH.
+      if ((scope === 'all' || scope === 'future')) {
+        try {
+          const qPreview = `?scope=${scope === 'all' ? 'all' : 'future'}&preview=true`;
+          const previewUrl = `/api/events/${encodeURIComponent(eventData.id)}${qPreview}` + (discoveredTpl ? `&templateId=${encodeURIComponent(discoveredTpl)}` : '');
+          const previewResp = await fetch(previewUrl, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(pendingBody) });
+          if (previewResp && previewResp.ok) {
+            const pj = await previewResp.json().catch(() => null);
+            const activeCount = pj?.details?.candidateActiveIds?.length || 0;
+            const archivedCount = pj?.details?.candidateArchivedIds?.length || 0;
+            const total = activeCount + archivedCount;
+            if (total > 0) {
+              const proceed = window.confirm(`About to update ${total} events in this series. Click OK to apply to all occurrences, or Cancel to abort.`);
+              if (proceed) {
+                const q = `?scope=${scope === 'all' ? 'all' : 'future'}` + (discoveredTpl ? `&templateId=${encodeURIComponent(discoveredTpl)}` : '');
+                const applyUrl = `/api/events/${encodeURIComponent(eventData.id)}${q}`;
+                const applyResp = await fetch(applyUrl, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(pendingBody) });
+                if (applyResp && applyResp.ok) {
+                  setPendingBody(null);
+                  setPendingSave(false);
+                  setShowEditScope(false);
+                  setClose();
+                  return;
+                }
+              } else {
+                setSubmitting(false);
+                return;
+              }
+            }
+          }
+        } catch (e) {
+          console.warn('[AddEventModal] server preview/apply attempt failed, will continue to client fallback', e);
+        }
+      }
+
       const listResp = await fetch('/api/events');
       if (!listResp.ok) throw new Error('Failed to list events for bulk update');
       const listBody = await listResp.json().catch(() => null);
       const eventsList = Array.isArray(listBody?.events) ? listBody.events : (Array.isArray(listBody) ? listBody : []);
       const rawBase = (eventData as any).date || ((eventData as any).raw && (eventData as any).raw.date) || eventData.startDate || null;
       const baseDate = rawBase ? (parseDatePreserveLocal(rawBase) || buildLocalDateFromParts(String(rawBase).slice(0,10)) || new Date(String(rawBase))) : null;
+
+      const normalize = (s: any) => String(s || '').toLowerCase().replace(/\s+/g, ' ').trim();
+      const timeHour = (t: any) => {
+        try {
+          const str = String(t || '').trim();
+          if (!str) return null;
+          // Accept HH:MM or HH formats
+          const m = str.match(/(\d{1,2})(?::(\d{2}))?/);
+          if (!m) return null;
+          const hh = Number(m[1]);
+          return String(hh).padStart(2, '0');
+        } catch (e) { return null; }
+      };
+
       const toApply = eventsList.filter((ev) => {
-        const evAny = ev as any;
-        const evTpl = evAny.template_id || (evAny.raw && (evAny.raw.template_id || evAny.raw.templateId)) || null;
-        if (!evTpl || String(evTpl) !== String(tplId)) return false;
-        if (scope === 'future') {
-          try {
-            const rawEv = ev.date || ev.startDate || ev.start_date || ev.startDate || null;
-            const evDate = rawEv ? (parseDatePreserveLocal(rawEv) || buildLocalDateFromParts(String(rawEv).slice(0,10)) || new Date(String(rawEv))) : null;
-            return evDate && baseDate ? evDate >= baseDate : false;
-          } catch (e) { return false; }
+        const evAnyLocal = ev as any;
+        const evTpl = evAnyLocal.template_id || (evAnyLocal.meta && (evAnyLocal.meta.template_id || evAnyLocal.meta.templateId)) || (evAnyLocal.raw && (evAnyLocal.raw.template_id || evAnyLocal.raw.templateId)) || null;
+
+        // If we discovered a template id, match it (including meta/raw/embedded META)
+        if (discoveredTpl && evTpl && String(evTpl) === String(discoveredTpl)) {
+          if (scope === 'future') {
+            try {
+              const rawEv = ev.date || ev.startDate || ev.start_date || ev.startDate || null;
+              const evDate = rawEv ? (parseDatePreserveLocal(rawEv) || buildLocalDateFromParts(String(rawEv).slice(0,10)) || new Date(String(rawEv))) : null;
+              return evDate && baseDate ? evDate >= baseDate : false;
+            } catch (e) { return false; }
+          }
+          return true;
         }
-        return true;
+
+        // No explicit template match: check embedded META JSON for template_id or repeatOption
+        try {
+          const desc = evAnyLocal.description || (evAnyLocal.raw && evAnyLocal.raw.description) || '';
+          const m = String(desc).match(/\[META\]([\s\S]*?)\[META\]/);
+          if (m && m[1]) {
+            try {
+              const parsed = JSON.parse(m[1]);
+              if (parsed) {
+                if (discoveredTpl && (parsed.template_id || parsed.templateId) && String(parsed.template_id || parsed.templateId) === String(discoveredTpl)) return true;
+                if (parsed.repeatOption && pendingBody && pendingBody.repeatOption && String(parsed.repeatOption) === String(pendingBody.repeatOption)) return true;
+              }
+            } catch (e) {}
+          }
+        } catch (e) {}
+
+        // Broader heuristic: match by normalized title (case-insensitive) and hour-only time match
+        try {
+          const candidateTitle = normalize(evAnyLocal.title || evAnyLocal.subject || (evAnyLocal.raw && (evAnyLocal.raw.title || evAnyLocal.raw.subject)) || '');
+          const desiredTitle = normalize(pendingBody && pendingBody.title ? pendingBody.title : '');
+          const titleMatch = desiredTitle && candidateTitle && (candidateTitle === desiredTitle || candidateTitle.includes(desiredTitle) || desiredTitle.includes(candidateTitle));
+
+          const candidateTimeHour = timeHour(evAnyLocal.time || evAnyLocal.startTime || evAnyLocal.start_time || (evAnyLocal.meta && evAnyLocal.meta.time) || (evAnyLocal.raw && (evAnyLocal.raw.time || evAnyLocal.raw.startTime || evAnyLocal.raw.start_time)) || evAnyLocal.startDate || '');
+          const desiredTimeHour = timeHour(pendingBody && pendingBody.time ? pendingBody.time : (pendingBody && pendingBody.startDate ? pendingBody.startDate : ''));
+          const timeMatch = desiredTimeHour && candidateTimeHour && desiredTimeHour === candidateTimeHour;
+
+          if (titleMatch && timeMatch) {
+            if (scope === 'future') {
+              if (!baseDate) return false;
+              const candidateDate = evAnyLocal.date || evAnyLocal.startDate || evAnyLocal.start_date || null;
+              if (!candidateDate) return false;
+              const cand = candidateDate ? (parseDatePreserveLocal(candidateDate) || buildLocalDateFromParts(String(candidateDate).slice(0,10)) || new Date(String(candidateDate))) : null;
+              return cand && baseDate ? cand >= baseDate : false;
+            }
+            return true;
+          }
+        } catch (e) {}
+
+        return false;
       });
 
       // Patch each matched event sequentially (keeps server load reasonable)
-      for (const ev of toApply) {
-        try {
-          await fetch(`/api/events/${encodeURIComponent(ev.id)}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(pendingBody) });
-        } catch (e) {
-          console.warn('Bulk update failed for event', ev && ev.id, e);
+      try {
+        try { console.debug('[AddEventModal] bulk update candidates:', toApply.length, toApply.map((x:any) => x && x.id)); } catch (e) {}
+        for (const ev of toApply) {
+          try {
+            const resp = await fetch(`/api/events/${encodeURIComponent(ev.id)}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(pendingBody) });
+            try { console.debug('[AddEventModal] PATCH', ev && ev.id, 'status', resp && resp.status); } catch (e) {}
+          } catch (e) {
+            console.warn('Bulk update failed for event', ev && ev.id, e);
+          }
         }
+      } catch (e) {
+        console.warn('[AddEventModal] error iterating bulk updates', e);
       }
 
-      // Optimistically update local provider by updating current event
+      // If we patched multiple events, force a full reload so the UI reflects
+      // the bulk changes (provider pages will also refresh on their own).
+      try {
+        if (toApply.length > 1) {
+          try { console.debug('[AddEventModal] bulk update applied to multiple events, reloading page to reflect changes'); } catch (e) {}
+          // Give the browser a moment to settle network requests then reload
+          setTimeout(() => window.location.reload(), 150);
+          return;
+        }
+      } catch (e) { /* ignore */ }
+
+      // Last-resort broader match: if we didn't match many events, try a
+      // title-substring match (case-insensitive) to find other materialized
+      // occurrences. This is aggressive and may match false positives, but
+      // it's a necessary fallback for materialized series that lack explicit
+      // template linkage.
+      try {
+            if ((toApply.length || 0) <= 1) {
+          try { console.debug('[AddEventModal] attempting broad title-substring fallback'); } catch (e) {}
+          const desired = normalize(pendingBody && pendingBody.title ? pendingBody.title : (eventData && eventData.title ? eventData.title : ''));
+          if (desired) {
+            const broad = eventsList.filter((ev: any) => {
+              try {
+                const cand = normalize(ev.title || ev.subject || (ev.raw && (ev.raw.title || ev.raw.subject)) || '');
+                if (!cand) return false;
+                return cand === desired || cand.includes(desired) || desired.includes(cand);
+              } catch (e) { return false; }
+            });
+            try { console.debug('[AddEventModal] broad fallback candidates:', broad.length, broad.map((x:any) => x && x.id)); } catch (e) {}
+            if (broad.length > 1) {
+              for (const ev of broad) {
+                try {
+                  const resp = await fetch(`/api/events/${encodeURIComponent(ev.id)}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(pendingBody) });
+                  try { console.debug('[AddEventModal] broad PATCH', ev && ev.id, 'status', resp && resp.status); } catch (e) {}
+                } catch (e) {
+                  console.warn('Broad bulk update failed for event', ev && ev.id, e);
+                }
+              }
+              try { console.debug('[AddEventModal] broad bulk update applied, reloading'); } catch (e) {}
+              setTimeout(() => window.location.reload(), 150);
+              return;
+            }
+
+            // Aggressive fallback: match by first 1-2 significant title tokens + hour-only time
+            try { console.debug('[AddEventModal] attempting aggressive token+hour fallback'); } catch (e) {}
+            const tokens = desired.split(' ').filter((t: string) => t.length > 2).slice(0,2);
+            const desiredHour = timeHour(pendingBody && pendingBody.time ? pendingBody.time : (pendingBody && pendingBody.startDate ? pendingBody.startDate : ''));
+            if (tokens.length > 0) {
+              const aggressive = eventsList.filter((ev: any) => {
+                try {
+                  const cand = normalize(ev.title || ev.subject || (ev.raw && (ev.raw.title || ev.raw.subject)) || '');
+                  if (!cand) return false;
+                  // require all tokens to be present in candidate title
+                  const hasTokens = tokens.every((tk: string) => cand.includes(tk));
+                  if (!hasTokens) return false;
+                  if (desiredHour) {
+                    const ch = timeHour(ev.time || ev.startTime || ev.start_date || ev.startDate || (ev.raw && (ev.raw.time || ev.raw.startTime || ev.raw.start_date)) || ev.startDate || '');
+                    if (!ch) return false;
+                    return String(ch) === String(desiredHour);
+                  }
+                  return true;
+                } catch (e) { return false; }
+              });
+              try { console.debug('[AddEventModal] aggressive fallback candidates:', aggressive.length, aggressive.map((x:any) => x && x.id)); } catch (e) {}
+              if (aggressive.length > 1) {
+                for (const ev of aggressive) {
+                  try {
+                    const resp = await fetch(`/api/events/${encodeURIComponent(ev.id)}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(pendingBody) });
+                    try { console.debug('[AddEventModal] aggressive PATCH', ev && ev.id, 'status', resp && resp.status); } catch (e) {}
+                  } catch (e) {
+                    console.warn('Aggressive bulk update failed for event', ev && ev.id, e);
+                  }
+                }
+                try { console.debug('[AddEventModal] aggressive bulk update applied, reloading'); } catch (e) {}
+                setTimeout(() => window.location.reload(), 150);
+                return;
+              }
+            }
+          }
+        }
+      } catch (e) { console.warn('[AddEventModal] broad fallback failed', e); }
+
+      // Single-item fallback: optimistically update current event
       handlers.handleLocalUpdateEvent?.({ ...(eventData as any), ...(pendingBody || {}) } as any);
       setPendingBody(null);
       setPendingSave(false);
@@ -271,6 +533,27 @@ export default function AddEventModal({
       setSubmitting(false);
     }
   }
+
+  // Robust series detection: detect template_id or repeatOption from top-level,
+  // raw payload, or embedded [META] JSON in the description so materialized
+  // occurrences are still recognized as part of a series.
+  const extractTplFromDescription = (obj: any) => {
+    try {
+      if (!obj) return null;
+      if (obj.repeatOption) return obj.repeatOption;
+      if (obj.template_id) return obj.template_id;
+      if (obj.templateId) return obj.templateId;
+      if (obj.raw && (obj.raw.template_id || obj.raw.templateId)) return obj.raw.template_id || obj.raw.templateId;
+      const desc = obj.description || (obj.raw && obj.raw.description) || '';
+      if (desc && typeof desc === 'string') {
+        const m = String(desc).match(/\[META\]([\s\S]*?)\[META\]/);
+        if (m && m[1]) {
+          try { const parsed = JSON.parse(m[1]); return parsed?.template_id || parsed?.templateId || parsed?.repeatOption || null; } catch (e) { return null; }
+        }
+      }
+    } catch (e) { /* ignore */ }
+    return null;
+  };
 
   const onSubmit: SubmitHandler<EventFormData> = async (formData) => {
     setSaveError(null);
@@ -359,8 +642,11 @@ export default function AddEventModal({
         handlers.handleLocalAddEvent?.(finalEvent);
       } else {
         // If the event is part of a recurrence/template, ask scope before applying edits
-  const evAny = eventData as any;
-  const isSeries = !!(evAny && (evAny.repeatOption || evAny.template_id || (evAny.raw && (evAny.raw.template_id || evAny.raw.templateId))));
+        const evAny = eventData as any;
+        const isSeries = !!extractTplFromDescription(evAny);
+        try {
+          if (process && process.env && process.env.NODE_ENV === 'development') console.debug('[AddEventModal] selectedEvent debug:', evAny, 'isSeries:', isSeries);
+        } catch (e) {}
         if (isSeries) {
             // Show edit scope modal and apply update based on user's choice
             setPendingSave(true);
@@ -408,6 +694,50 @@ export default function AddEventModal({
     } finally {
       setSubmitting(false);
     }
+  };
+
+  // Build the body from current form values (used for preparing pendingBody when
+  // opening the EditScopeModal without immediately submitting to the server).
+  const buildPendingBody = () => {
+    const values = getValues();
+    const newEvent: any = {
+      id: eventData?.id || uuidv4(),
+      title: values.title,
+      startDate: values.startDate,
+      endDate: values.endDate,
+      variant: values.variant,
+    };
+    const toDateObj = (d: any) => d instanceof Date ? d : new Date(String(d));
+    const start = toDateObj(newEvent.startDate);
+    const end = toDateObj(newEvent.endDate);
+    const pad = (n: number) => String(n).padStart(2, "0");
+    const localDate = `${start.getFullYear()}-${pad(start.getMonth() + 1)}-${pad(start.getDate())}`;
+    const time = `${pad(start.getHours())}:${pad(start.getMinutes())}`;
+    const durationMinutes = Math.max(1, Math.round((end.getTime() - start.getTime()) / 60000));
+
+    const body: any = {
+      title: newEvent.title,
+      description: values.description?.trim() || null,
+      date: localDate,
+      time,
+      durationMinutes,
+      startDate: start.toISOString(),
+      endDate: end.toISOString(),
+      type: selectedType,
+      color: selectedColor,
+    };
+    try { body.meta = { endDate: end.toISOString(), durationMinutes }; } catch (e) {}
+    if (selectedByDays.length > 0) {
+      body.repeatOption = 'weekly';
+      body.byDays = selectedByDays;
+      if (intervalWeeks > 1) body.interval = intervalWeeks;
+      if (createTemplate) body.isTemplate = true;
+      else if (materializeCount && materializeCount > 0) body.materializeCount = materializeCount;
+      else if (materializeUntil) body.materializeUntil = materializeUntil;
+    }
+    const isDev = typeof process !== "undefined" && process.env?.NODE_ENV === "development";
+    if (isDev) body.userId = "smoke_user";
+    return body;
   };
 
   async function handleDeleteScopeConfirm(scope: string) {
@@ -1078,42 +1408,66 @@ export default function AddEventModal({
                 >
                   Cancel
                 </Button>
-                <Button 
-                  type="button" 
-                  disabled={submitting}
-                  onClick={handleSubmit(onSubmit)}
-                  className={cn(
-                    "px-5 py-2 text-sm font-bold text-white rounded-lg transition-all duration-200",
-                    "bg-blue-500 hover:bg-blue-600",
-                    "shadow-lg shadow-blue-500/30 hover:shadow-blue-500/50",
-                    "disabled:opacity-50 disabled:cursor-not-allowed disabled:shadow-none",
-                    submitting && "animate-pulse"
-                  )}
-                >
-                  {submitting ? (
-                    <span className="flex items-center gap-2">
-                      <svg className="animate-spin h-4 w-4" fill="none" viewBox="0 0 24 24">
-                        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
-                        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-                      </svg>
-                      Saving...
-                    </span>
-                  ) : (
-                    <span className="flex items-center gap-2">
-                      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
-                      </svg>
-                      {eventData?.id ? 'Update Event' : 'Create Event'}
-                    </span>
-                  )}
-                </Button>
+                <div className="flex items-center rounded-md overflow-hidden">
+                  <button
+                    onClick={handleSubmit(onSubmit)}
+                    disabled={submitting}
+                    className={cn(
+                      "px-5 py-2 text-sm font-bold text-white rounded-l-lg transition-all duration-200",
+                      "bg-blue-500 hover:bg-blue-600",
+                      "shadow-lg shadow-blue-500/30 hover:shadow-blue-500/50",
+                      "disabled:opacity-50 disabled:cursor-not-allowed disabled:shadow-none",
+                      submitting && "animate-pulse"
+                    )}
+                  >
+                    {submitting ? (
+                      <span className="flex items-center gap-2">
+                        <svg className="animate-spin h-4 w-4" fill="none" viewBox="0 0 24 24">
+                          <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                          <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                        </svg>
+                        Saving...
+                      </span>
+                    ) : (
+                      <span className="flex items-center gap-2">
+                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                        </svg>
+                        {eventData?.id ? 'Update Event' : 'Create Event'}
+                      </span>
+                    )}
+                  </button>
+                  <button
+                    onClick={() => {
+                      // Validate form and then prepare pending body to show EditScopeModal
+                      handleSubmit((_data) => {
+                        const body = buildPendingBody();
+                        setPendingBody(body);
+                        setShowEditScope(true);
+                      })();
+                    }}
+                    type="button"
+                    className="px-4 py-2 text-sm bg-blue-600/90 text-white rounded-r-lg hover:bg-blue-700 transition-colors"
+                    aria-label="More save options"
+                  >
+                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" /></svg>
+                  </button>
+                </div>
               </div>
               {/* Edit scope modal for recurring events */}
+              {process && process.env && process.env.NODE_ENV === 'development' && showEditScope && (
+                <div className="p-2 mb-2 text-xs text-gray-600 dark:text-gray-300">
+                  <label className="inline-flex items-center gap-2">
+                    <input type="checkbox" checked={forceClientBulk} onChange={(e) => setForceClientBulk(Boolean(e.target.checked))} />
+                    <span>Force client-side bulk update (dev only)</span>
+                  </label>
+                </div>
+              )}
               <EditScopeModal visible={showEditScope} mode={'edit'} onClose={() => { setShowEditScope(false); setPendingSave(false); setPendingBody(null); }} onConfirm={(scope) => {
                 // apply pending body based on user's choice
                 setShowEditScope(false);
                 (async () => {
-                  await applyPendingBody(scope);
+                  await applyPendingBody(scope, { forceClient: forceClientBulk });
                 })();
               }} />
               {/* Delete scope modal for deletions initiated from this edit modal */}

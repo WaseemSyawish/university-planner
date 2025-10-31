@@ -524,7 +524,8 @@ export default async function handler(req, res) {
                     title: title || '',
                     type: type || 'assignment',
                     course_id: courseId || null,
-                    date: localDateOnlyString(d),
+                    // store DateTime object (Prisma expects ISO DateTime)
+                    date: parseDateForStorage(d),
                     time: time || null,
                     description: finalDescription,
                     location: location,
@@ -577,7 +578,7 @@ export default async function handler(req, res) {
                       title: title || '',
                       type: type || 'assignment',
                       course_id: courseId || null,
-                      date: localDateOnlyString(d),
+                      date: parseDateForStorage(d),
                       time: time || null,
                       description: finalDescription,
                       location: location,
@@ -633,7 +634,7 @@ export default async function handler(req, res) {
                     title: title || '',
                     type: type || 'assignment',
                     course_id: courseId || null,
-                    date: localDateOnlyString(d),
+                    date: parseDateForStorage(d),
                     time: time || null,
                     description: finalDescription,
                     location: location,
@@ -725,7 +726,8 @@ export default async function handler(req, res) {
           const createData = {
             title,
             type: type || 'assignment',
-            date: localDateOnlyString(chosenDateObj),
+            // Prisma Event.date is DateTime - store a Date object
+            date: parseDateForStorage(chosenDateObj),
             time: chosenTimeStr,
             description: finalDescription,
             color: req.body && req.body.color ? String(req.body.color) : null,
@@ -754,7 +756,8 @@ export default async function handler(req, res) {
               const fallbackData = {
                 title,
                 type: type || 'assignment',
-                date: localDateOnlyString(chosenDateObj),
+                // store DateTime object for Prisma
+                date: parseDateForStorage(chosenDateObj),
                 time: chosenTimeStr,
                 description: finalDescription,
                 color: req.body && req.body.color ? String(req.body.color) : null,
@@ -787,7 +790,7 @@ export default async function handler(req, res) {
                 created = await prisma.event.create({ data: {
                   title,
                   type: type || 'assignment',
-                  date: localDateOnlyString(chosenDateObj),
+                  date: parseDateForStorage(chosenDateObj),
                   time: chosenTimeStr,
                   description: descriptionWithMeta,
                   color: req.body && req.body.color ? String(req.body.color) : null,

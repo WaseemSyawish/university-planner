@@ -315,6 +315,444 @@ export default async function handler(req, res) {
         };
 
         // Attempt to update in active events; if not found, try archived table explicitly
+        // Support scoped updates: ?scope=all or ?scope=future to update a whole series
+        const scope = req.query && req.query.scope ? String(req.query.scope) : null;
+        if (scope === 'all' || scope === 'future') {
+          console.log(`[events/:id] PATCH scope=${scope} requested for id=${id}`);
+        
+          // Discover template id or repeat metadata similar to DELETE scope=all
+          let tplId = req.query.templateId || req.query.template_id || null;
+          const repeatOptionQuery = req.query && (req.query.repeatOption || req.query.repeat_option) ? String(req.query.repeatOption || req.query.repeat_option) : null;
+          try {
+            const ev = await safeFindEvent(id, false);
+            if (ev) {
+              if (!tplId && Object.prototype.hasOwnProperty.call(ev, 'template_id')) tplId = ev.template_id || tplId;
+              try {
+                if (!tplId && ev.meta && typeof ev.meta === 'object') {
+                  tplId = ev.meta.template_id || ev.meta.templateId || tplId;
+                }
+              } catch (e) { /* ignore */ }
+              if (!tplId && ev.description && typeof ev.description === 'string') {
+                try {
+                  const m = String(ev.description).match(/\[META\]([\s\S]*?)\[META\]/);
+                  if (m && m[1]) {
+                    const parsed = JSON.parse(m[1]);
+                    tplId = parsed?.template_id || parsed?.templateId || tplId;
+                  }
+                } catch (e) { /* ignore parse errors */ }
+              }
+            }
+          } catch (e) {
+            console.warn('[events/:id] safeFindEvent failed while discovering template/repeat metadata for PATCH scope', e);
+          }
+
+          try {
+            const result = await prisma.$transaction(async (tx) => {
+              // If we discovered a template_id, prefer a fast bulk update path using
+              // template_id (indexed). This avoids brittle heuristics and allows
+              // reliable updateMany. For 'future' scope we restrict by date >= target.
+              if (tplId) {
+                // Determine target date for 'future' scope: use provided updateData.date or existing event.date
+                let targetDateForFuture = null;
+                if (scope === 'future') {
+                  if (updateData.date) targetDateForFuture = new Date(updateData.date);
+                  else {
+                    try {
+                      const existing = await tx.event.findUnique({ where: { id } }) || await tx.archivedEvent.findFirst({ where: { original_event_id: id } });
+                      if (existing && existing.date) targetDateForFuture = new Date(existing.date);
+                    } catch (e) { }
+                  }
+                }
+
+                const whereActive = (scope === 'future' && targetDateForFuture) ? { template_id: String(tplId), date: { gte: targetDateForFuture } } : { template_id: String(tplId) };
+                const whereArchived = (scope === 'future' && targetDateForFuture) ? { template_id: String(tplId), date: { gte: targetDateForFuture } } : { template_id: String(tplId) };
+
+                const candidateActive = await tx.event.findMany({ where: whereActive, select: { id: true } });
+                const candidateArchived = await tx.archivedEvent.findMany({ where: whereArchived, select: { id: true } });
+
+                const activeIds = candidateActive.map(r => r.id);
+                const archivedIds = candidateArchived.map(r => r.id);
+
+                // If caller requested a preview, return the candidate ids without applying updates.
+                if (req.query && String(req.query.preview) === 'true') {
+                  return {
+                    templateUpdated: false,
+                    preview: true,
+                    candidateActiveIds: activeIds,
+                    candidateArchivedIds: archivedIds
+                  };
+                }
+
+                let updatedActive = 0;
+                let updatedArchived = 0;
+
+                if (activeIds.length > 0) {
+                  try {
+                    // Use updateMany for performance; we already discovered the ids
+                    await tx.event.updateMany({ where: whereActive, data: pickPrismaFields(updateData) });
+                    updatedActive = activeIds.length;
+                  } catch (e) {
+                    // Fall back to per-row updates when updateMany fails
+                    for (const uid of activeIds) {
+                      try {
+                        await tx.event.update({ where: { id: uid }, data: pickPrismaFields(updateData) });
+                        updatedActive++;
+                      } catch (pe) {
+                        try {
+                          const reduced = { ...pickPrismaFields(updateData) };
+                          if (Object.prototype.hasOwnProperty.call(reduced, 'meta')) delete reduced.meta;
+                          if (Object.prototype.hasOwnProperty.call(reduced, 'end_date')) delete reduced.end_date;
+                          await tx.event.update({ where: { id: uid }, data: reduced });
+                          updatedActive++;
+                        } catch (ppe) {
+                          console.warn('[events/:id] per-row fallback update failed for active id', uid, ppe && ppe.message ? ppe.message : ppe);
+                        }
+                      }
+                    }
+                  }
+                }
+
+                if (archivedIds.length > 0) {
+                  try {
+                    await tx.archivedEvent.updateMany({ where: whereArchived, data: pickPrismaFields(updateData) });
+                    updatedArchived = archivedIds.length;
+                  } catch (e) {
+                    for (const aid of archivedIds) {
+                      try {
+                        await tx.archivedEvent.update({ where: { id: aid }, data: pickPrismaFields(updateData) });
+                        updatedArchived++;
+                      } catch (pae) {
+                        try {
+                          const reduced = { ...pickPrismaFields(updateData) };
+                          if (Object.prototype.hasOwnProperty.call(reduced, 'meta')) delete reduced.meta;
+                          if (Object.prototype.hasOwnProperty.call(reduced, 'end_date')) delete reduced.end_date;
+                          await tx.archivedEvent.update({ where: { id: aid }, data: reduced });
+                          updatedArchived++;
+                        } catch (ppae) {
+                          console.warn('[events/:id] per-row fallback update failed for archived id', aid, ppae && ppae.message ? ppae.message : ppae);
+                        }
+                      }
+                    }
+                  }
+                }
+
+                return {
+                  templateUpdated: false,
+                  updatedActive: updatedActive,
+                  updatedArchived: updatedArchived,
+                  updatedActiveIds: (process.env.NODE_ENV === 'development') ? activeIds : undefined,
+                  updatedArchivedIds: (process.env.NODE_ENV === 'development') ? archivedIds : undefined
+                };
+              }
+
+              // Fetch all active events minimally
+              const allActive = await tx.event.findMany({ select: { id: true, title: true, date: true, time: true, description: true, meta: true, template_id: true } });
+              const idsToUpdate = new Set();
+
+              for (const e of allActive) {
+                try {
+                  if (tplId && e.template_id && String(e.template_id) === String(tplId)) { idsToUpdate.add(e.id); continue; }
+                  if (tplId && e.meta && typeof e.meta === 'object') {
+                    if (String(e.meta.template_id || e.meta.templateId || '') === String(tplId)) { idsToUpdate.add(e.id); continue; }
+                  }
+                  if (repeatOptionQuery && e.meta && typeof e.meta === 'object') {
+                    if (String(e.meta.repeatOption || e.meta.repeat_option || e.meta.repeatoption || '') === String(repeatOptionQuery)) { idsToUpdate.add(e.id); continue; }
+                  }
+
+                  if (e.description && typeof e.description === 'string') {
+                    const m = String(e.description).match(/\[META\]([\s\S]*?)\[META\]/);
+                    if (m && m[1]) {
+                      try {
+                        const parsed = JSON.parse(m[1]);
+                        if (tplId && String(parsed.template_id || parsed.templateId || '') === String(tplId)) { idsToUpdate.add(e.id); continue; }
+                        if (repeatOptionQuery && String(parsed.repeatOption || parsed.repeat_option || parsed.repeatoption || '') === String(repeatOptionQuery)) { idsToUpdate.add(e.id); continue; }
+                      } catch (pe) { /* ignore parse errors */ }
+                    }
+                  }
+                } catch (inner) { /* ignore per-event errors */ }
+              }
+
+              // Also attempt to update archived events by scanning description/meta
+              const allArchived = await tx.archivedEvent.findMany({ select: { id: true, original_event_id: true, description: true, meta: true } });
+              const archivedIdsToUpdate = new Set();
+              for (const e of allArchived) {
+                try {
+                  if (e.meta && typeof e.meta === 'object') {
+                    if (tplId && String(e.meta.template_id || e.meta.templateId || '') === String(tplId)) { archivedIdsToUpdate.add(e.id); continue; }
+                    if (repeatOptionQuery && String(e.meta.repeatOption || e.meta.repeat_option || e.meta.repeatoption || '') === String(repeatOptionQuery)) { archivedIdsToUpdate.add(e.id); continue; }
+                  }
+                  if (e.description && typeof e.description === 'string') {
+                    const m = String(e.description).match(/\[META\]([\s\S]*?)\[META\]/);
+                    if (m && m[1]) {
+                      try {
+                        const parsed = JSON.parse(m[1]);
+                        if (tplId && String(parsed.template_id || parsed.templateId || '') === String(tplId)) { archivedIdsToUpdate.add(e.id); continue; }
+                        if (repeatOptionQuery && String(parsed.repeatOption || parsed.repeat_option || parsed.repeatoption || '') === String(repeatOptionQuery)) { archivedIdsToUpdate.add(e.id); continue; }
+                      } catch (pe) { }
+                    }
+                  }
+                } catch (inner) { }
+              }
+
+              // If no matches found via metadata, fall back to best-effort title/time matching
+              if (idsToUpdate.size === 0 && archivedIdsToUpdate.size === 0) {
+                try {
+                  const target = await tx.event.findUnique({ where: { id }, select: { title: true, time: true, date: true } }) || await tx.archivedEvent.findFirst({ where: { original_event_id: id }, select: { title: true, time: true, date: true } });
+                  if (target && target.title) {
+                    const titleMatch = String(target.title).trim();
+                    // For future scope, only match events >= target.date
+                    const timeMatch = target.time || null;
+                    let similarActive = [];
+                    if (scope === 'future' && target.date) {
+                      similarActive = await tx.event.findMany({ where: { title: titleMatch, time: timeMatch, date: { gte: target.date } }, select: { id: true } });
+                    } else {
+                      similarActive = await tx.event.findMany({ where: { title: titleMatch, time: timeMatch }, select: { id: true } });
+                    }
+                    for (const s of similarActive) idsToUpdate.add(s.id);
+                    let similarArchived = [];
+                    if (scope === 'future' && target.date) {
+                      similarArchived = await tx.archivedEvent.findMany({ where: { title: titleMatch, time: timeMatch, /* archivedEvent may not have date field in some schemas */ }, select: { id: true } });
+                    } else {
+                      similarArchived = await tx.archivedEvent.findMany({ where: { title: titleMatch, time: timeMatch }, select: { id: true } });
+                    }
+                    for (const s of similarArchived) archivedIdsToUpdate.add(s.id);
+                    // If the strict exact-match queries found nothing, attempt a relaxed
+                    // case-insensitive substring match on title and hour-only time match.
+                    // This helps when materialized occurrences lost explicit template linkage
+                    // or have slight title variations. Use Prisma `contains` with
+                    // `mode: 'insensitive'` when available.
+                    try {
+                      if (idsToUpdate.size === 0 && archivedIdsToUpdate.size === 0) {
+                        const titleLower = titleMatch;
+                        // Relaxed active events search
+                        let relaxedActive = [];
+                        if (scope === 'future' && target.date) {
+                          relaxedActive = await tx.event.findMany({ where: { title: { contains: titleLower, mode: 'insensitive' }, date: { gte: target.date } }, select: { id: true, time: true, date: true } });
+                        } else {
+                          relaxedActive = await tx.event.findMany({ where: { title: { contains: titleLower, mode: 'insensitive' } }, select: { id: true, time: true, date: true } });
+                        }
+                        for (const s of relaxedActive) {
+                          try {
+                            // If we have a time match requirement, compare hour-only
+                            if (timeMatch) {
+                              const sh = s.time ? String(s.time).slice(0,2) : null;
+                              const th = timeMatch ? String(timeMatch).slice(0,2) : null;
+                              if (sh && th && String(sh) === String(th)) idsToUpdate.add(s.id);
+                            } else {
+                              idsToUpdate.add(s.id);
+                            }
+                          } catch (inner) {}
+                        }
+
+                        // Relaxed archived events search
+                        let relaxedArchived = await tx.archivedEvent.findMany({ where: { title: { contains: titleLower, mode: 'insensitive' } }, select: { id: true, description: true } });
+                        for (const s of relaxedArchived) {
+                          try { archivedIdsToUpdate.add(s.id); } catch (inner) {}
+                        }
+                      }
+                    } catch (relaxedErr) {
+                      // Non-fatal: log and continue - keep original behavior if Prisma mode not supported
+                      console.warn('[events/:id] relaxed title-substring matching failed or not supported:', relaxedErr && relaxedErr.message ? relaxedErr.message : relaxedErr);
+                    }
+                  }
+                } catch (bestErr) {
+                  console.warn('[events/:id] Best-effort title/time bulk update failed:', bestErr);
+                }
+              }
+
+              // If an EventTemplate model exists and tplId was discovered, update the template record
+              const hasEventTemplateModel = typeof prisma.eventTemplate !== 'undefined' && prisma.eventTemplate !== null;
+              let templateUpdated = null;
+              if (hasEventTemplateModel && tplId) {
+                try {
+                  const tplUpdateData = {};
+                  // Map a limited set of updatable fields from updateData to template
+                  if (Object.prototype.hasOwnProperty.call(updateData, 'title')) tplUpdateData.title = updateData.title;
+                  if (Object.prototype.hasOwnProperty.call(updateData, 'course_id')) tplUpdateData.course_id = updateData.course_id;
+                  if (Object.prototype.hasOwnProperty.call(updateData, 'repeat_option')) tplUpdateData.repeat_option = updateData.repeat_option;
+                  if (Object.prototype.hasOwnProperty.call(updateData, 'date')) tplUpdateData.start_date = updateData.date;
+                  if (Object.keys(tplUpdateData).length > 0) {
+                    templateUpdated = await tx.eventTemplate.update({ where: { id: tplId }, data: tplUpdateData });
+                  }
+                } catch (te) {
+                  console.warn('[events/:id] eventTemplate update failed for tplId=', tplId, te && te.message ? te.message : te);
+                }
+              }
+
+              // Apply updates to matched active events
+              // If no ids were discovered by metadata or exact/title+time matching,
+              // perform a JS-based relaxed pass over the fetched `allActive` and
+              // `allArchived` arrays: case-insensitive substring title match and
+              // hour-only time match. This avoids relying on DB-specific
+              // `mode: 'insensitive'` support and increases chance of matching
+              // materialized occurrences.
+              try {
+                if (idsToUpdate.size === 0 && archivedIdsToUpdate.size === 0) {
+                  try {
+                    const norm = (s) => String(s || '').toLowerCase().replace(/\s+/g, ' ').trim();
+                    // attempt to load the target title/time from previously fetched `allActive` or via tx lookup
+                    let targetTitle = null;
+                    let targetTime = null;
+                    try {
+                      const targetItem = allActive.find(a => String(a.id) === String(id)) || null;
+                      if (targetItem && targetItem.title) targetTitle = norm(targetItem.title);
+                      if (targetItem && targetItem.time) targetTime = String(targetItem.time).slice(0,2);
+                    } catch (e) { /* ignore */ }
+
+                    if (!targetTitle) {
+                      try {
+                        const maybe = await tx.event.findUnique({ where: { id }, select: { title: true, time: true } }) || await tx.archivedEvent.findFirst({ where: { original_event_id: id }, select: { title: true, time: true } });
+                        if (maybe && maybe.title) targetTitle = norm(maybe.title);
+                        if (maybe && maybe.time) targetTime = String(maybe.time).slice(0,2);
+                      } catch (e) { /* ignore */ }
+                    }
+
+                    if (targetTitle) {
+                      for (const e of allActive) {
+                        try {
+                          const cand = norm(e.title || '');
+                          if (!cand) continue;
+                          if (cand === targetTitle || cand.includes(targetTitle) || targetTitle.includes(cand)) {
+                            if (targetTime) {
+                              const eh = e.time ? String(e.time).slice(0,2) : null;
+                              if (eh && String(eh) === String(targetTime)) idsToUpdate.add(e.id);
+                            } else {
+                              idsToUpdate.add(e.id);
+                            }
+                          }
+                        } catch (inner) {}
+                      }
+                      for (const e of allArchived) {
+                        try {
+                          const cand = norm(e.title || '');
+                          if (!cand) continue;
+                          if (cand === targetTitle || cand.includes(targetTitle) || targetTitle.includes(cand)) {
+                            archivedIdsToUpdate.add(e.id);
+                          }
+                        } catch (inner) {}
+                      }
+                    }
+                  } catch (relaxedErr) {
+                    console.warn('[events/:id] JS relaxed matching failed:', relaxedErr && relaxedErr.message ? relaxedErr.message : relaxedErr);
+                  }
+                }
+              } catch (e) {}
+              // Apply updates deterministically per-row for maximum reliability.
+              // Bulk updateMany has proven unreliable across varying schemas and
+              // Prisma/DB behaviors; perform per-row updates with careful fallbacks
+              // (retry without `meta`, try archived table) and collect exact ids
+              // that were successfully updated.
+              // If caller requested a preview, return the candidate ids without applying updates.
+              if (req.query && String(req.query.preview) === 'true') {
+                return {
+                  templateUpdated: !!templateUpdated,
+                  preview: true,
+                  candidateActiveIds: Array.from(idsToUpdate),
+                  candidateArchivedIds: Array.from(archivedIdsToUpdate)
+                };
+              }
+              let updatedActiveCount = 0;
+              const updatedActiveIds = [];
+              if (idsToUpdate.size > 0) {
+                const ids = Array.from(idsToUpdate);
+                for (const uid of ids) {
+                  try {
+                    // Attempt per-row update; strip unsupported fields on failure
+                    try {
+                      await tx.event.update({ where: { id: uid }, data: pickPrismaFields(updateData) });
+                      updatedActiveCount++;
+                      updatedActiveIds.push(uid);
+                      continue;
+                    } catch (perErr) {
+                      // If missing-column/unknown-arg issues occur, try a reduced payload
+                      try {
+                        const reduced = { ...pickPrismaFields(updateData) };
+                        if (Object.prototype.hasOwnProperty.call(reduced, 'meta')) delete reduced.meta;
+                        // also remove end_date if DB complains in some environments
+                        if (Object.prototype.hasOwnProperty.call(reduced, 'end_date')) delete reduced.end_date;
+                        await tx.event.update({ where: { id: uid }, data: reduced });
+                        updatedActiveCount++;
+                        updatedActiveIds.push(uid);
+                        continue;
+                      } catch (reducedErr) {
+                        // If still failing, we'll attempt archived fallback below
+                      }
+                    }
+
+                    // If updating active event failed (e.g., not present), try archivedEvent
+                    try {
+                      // Try updating by original_event_id then by archived id
+                      await tx.archivedEvent.update({ where: { original_event_id: uid }, data: pickPrismaFields(updateData) });
+                      updatedActiveCount++;
+                      updatedActiveIds.push(uid);
+                      continue;
+                    } catch (archErr) {
+                      try {
+                        await tx.archivedEvent.update({ where: { id: uid }, data: pickPrismaFields(updateData) });
+                        updatedActiveCount++;
+                        updatedActiveIds.push(uid);
+                        continue;
+                      } catch (archErr2) {
+                        // Give up on this id but keep processing others
+                        console.warn('[events/:id] per-row update failed for id=', uid, archErr2 && archErr2.message ? archErr2.message : archErr2);
+                      }
+                    }
+                  } catch (finalErr) {
+                    console.warn('[events/:id] unexpected error updating id=', uid, finalErr && finalErr.message ? finalErr.message : finalErr);
+                  }
+                }
+              }
+
+              // Apply updates to archived events that were discovered separately
+              let updatedArchivedCount = 0;
+              const updatedArchivedIds = [];
+              if (archivedIdsToUpdate.size > 0) {
+                const aids = Array.from(archivedIdsToUpdate);
+                for (const aid of aids) {
+                  try {
+                    try {
+                      await tx.archivedEvent.update({ where: { id: aid }, data: pickPrismaFields(updateData) });
+                      updatedArchivedCount++;
+                      updatedArchivedIds.push(aid);
+                      continue;
+                    } catch (aErr) {
+                      // Retry without meta if needed
+                      try {
+                        const reducedA = { ...pickPrismaFields(updateData) };
+                        if (Object.prototype.hasOwnProperty.call(reducedA, 'meta')) delete reducedA.meta;
+                        if (Object.prototype.hasOwnProperty.call(reducedA, 'end_date')) delete reducedA.end_date;
+                        await tx.archivedEvent.update({ where: { id: aid }, data: reducedA });
+                        updatedArchivedCount++;
+                        updatedArchivedIds.push(aid);
+                        continue;
+                      } catch (reAErr) {
+                        console.warn('[events/:id] per-row archived update failed for id=', aid, reAErr && reAErr.message ? reAErr.message : reAErr);
+                      }
+                    }
+                  } catch (finalAErr) {
+                    console.warn('[events/:id] unexpected error updating archived id=', aid, finalAErr && finalAErr.message ? finalAErr.message : finalAErr);
+                  }
+                }
+              }
+
+              // Return counts and (development-only) id lists so callers can inspect what was matched
+              return {
+                templateUpdated: !!templateUpdated,
+                updatedActive: updatedActiveCount,
+                updatedArchived: updatedArchivedCount,
+                updatedActiveIds: (process.env.NODE_ENV === 'development') ? updatedActiveIds : undefined,
+                updatedArchivedIds: (process.env.NODE_ENV === 'development') ? updatedArchivedIds : undefined,
+              };
+            });
+
+            console.log(`[events/:id] PATCH scope=${scope} updated series:`, result);
+            return res.status(200).json({ success: true, message: 'Series updated', details: result });
+          } catch (txErr) {
+            console.error('[events/:id] PATCH series transaction error:', txErr);
+            return res.status(500).json({ code: 'UPDATE_SERIES_FAILED', message: 'Failed to update event series', details: txErr?.message || String(txErr) });
+          }
+        }
+
         try {
           // diagnostic: check where the record currently exists
           const existingEvent = await safeFindEvent(id, false);

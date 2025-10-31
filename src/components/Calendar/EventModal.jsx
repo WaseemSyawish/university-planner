@@ -62,6 +62,56 @@ export default function EventModal({ visible = true, selectedEvent, modalMode = 
     setTimeout(() => titleRef.current?.focus?.(), 0);
   }, [selectedEvent ? JSON.stringify(selectedEvent) : null]);
 
+  // Helper: extract template/repeat metadata from an event (used to detect series)
+  const extractTplFromDescription = (obj) => {
+    try {
+      if (!obj) return null;
+      if (obj.repeatOption) return obj.repeatOption;
+      if (obj.template_id) return obj.template_id;
+      if (obj.templateId) return obj.templateId;
+      if (obj.raw && (obj.raw.template_id || obj.raw.templateId)) return obj.raw.template_id || obj.raw.templateId;
+      const desc = obj.description || (obj.raw && obj.raw.description) || '';
+      if (desc && typeof desc === 'string') {
+        const m = String(desc).match(/\[META\]([\s\S]*?)\[META\]/);
+        if (m && m[1]) {
+          try { const parsed = JSON.parse(m[1]); return parsed?.template_id || parsed?.templateId || parsed?.repeatOption || null; } catch (e) { return null; }
+        }
+      }
+    } catch (e) { /* ignore */ }
+    return null;
+  };
+
+  const isSeriesEvent = !!extractTplFromDescription(selectedEvent);
+
+  // Build the payload object for save operations (used by Save and the split-button)
+  const buildSavePayload = () => {
+    const finalDescription = formData.room ? `${formData.description || ''}\n\nLocation: ${formData.room}`.trim() : formData.description;
+    return {
+      id: selectedEvent?.id,
+      title: formData.title,
+      description: finalDescription || undefined,
+      date: formData.date || undefined,
+      time: formData.startTime,
+      endTime: formData.endTime,
+      durationMinutes: formData.durationMinutes,
+      type: formData.type,
+      color: formData.color,
+      courseId: formData.selectedCourse || undefined,
+      room: formData.room || undefined,
+      location: formData.room || undefined
+    };
+  };
+
+  // Provide a visible debug banner and console log to help diagnose why the
+  // edit-scope chooser may not appear for some events. This only appears in
+  // development to avoid UI noise in production.
+  React.useEffect(() => {
+    try {
+      if (process.env.NODE_ENV === 'development') {
+        console.debug('[EventModal] selectedEvent debug:', { selectedEvent, isSeriesEvent });
+      }
+    } catch (e) { /* ignore */ }
+  }, [selectedEvent, isSeriesEvent]);
   function handleSave() {
     const finalDescription = formData.room ? `${formData.description || ''}\n\nLocation: ${formData.room}`.trim() : formData.description;
     const payload = {
@@ -83,16 +133,30 @@ export default function EventModal({ visible = true, selectedEvent, modalMode = 
     // edits to only this instance or broader scope. We consider an event to be
     // part of a series when it has an explicit repeatOption or a template id
     // on the raw payload.
-    const isSeries = !!(
-      selectedEvent && (
-        selectedEvent.repeatOption ||
-        selectedEvent.template_id ||
-        selectedEvent.templateId ||
-        (selectedEvent.raw && (selectedEvent.raw.template_id || selectedEvent.raw.templateId))
-      )
-    );
+    // Detect whether this event is part of a series. Look for explicit template ids
+    // or embedded [META] JSON in the description so materialized occurrences
+    // without direct template_id fields are still recognized.
+    const extractTplFromDescription = (obj) => {
+      try {
+        if (!obj) return null;
+        if (obj.repeatOption) return obj.repeatOption;
+        if (obj.template_id) return obj.template_id;
+        if (obj.templateId) return obj.templateId;
+        if (obj.raw && (obj.raw.template_id || obj.raw.templateId)) return obj.raw.template_id || obj.raw.templateId;
+        const desc = obj.description || (obj.raw && obj.raw.description) || '';
+        if (desc && typeof desc === 'string') {
+          const m = String(desc).match(/\[META\]([\s\S]*?)\[META\]/);
+          if (m && m[1]) {
+            try { const parsed = JSON.parse(m[1]); return parsed?.template_id || parsed?.templateId || parsed?.repeatOption || null; } catch (e) { return null; }
+          }
+        }
+      } catch (e) { /* ignore */ }
+      return null;
+    };
+    const isSeries = !!extractTplFromDescription(selectedEvent);
     if (isSeries) {
       // Store pending payload and show scope chooser modal for edits
+      console.debug('[EventModal] Detected series event, showing edit-scope modal', { id: selectedEvent && selectedEvent.id });
       setPendingSavePayload(payload);
       setShowEditScopeModal(true);
       return;
@@ -141,11 +205,41 @@ export default function EventModal({ visible = true, selectedEvent, modalMode = 
 
           <div className="flex items-center gap-3">
             <button onClick={onClose} className="px-4 py-2 text-sm border rounded-md text-gray-700">Close</button>
-            <button onClick={handleSave} className="px-4 py-2 text-sm bg-indigo-600 text-white rounded-md shadow-sm">{modalMode === 'edit' ? 'Save changes' : 'Create event'}</button>
+            {modalMode === 'edit' ? (
+              // Always show split button in edit mode so users can explicitly open
+              // the EditScope modal even when automatic detection fails.
+              <div className="flex items-center rounded-md overflow-hidden">
+                <button onClick={handleSave} className="px-4 py-2 text-sm bg-indigo-600 text-white rounded-l-md shadow-sm">Save changes</button>
+                <button
+                  onClick={() => {
+                    // Prepare payload and show scope chooser regardless of detection
+                    const payload = buildSavePayload();
+                    setPendingSavePayload(payload);
+                    setShowEditScopeModal(true);
+                  }}
+                  className="px-3 py-2 text-sm bg-indigo-700/90 text-white rounded-r-md hover:bg-indigo-800 transition-colors"
+                  aria-label="More save options"
+                >
+                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" /></svg>
+                </button>
+              </div>
+            ) : (
+              <button onClick={handleSave} className="px-4 py-2 text-sm bg-indigo-600 text-white rounded-md shadow-sm">{modalMode === 'edit' ? 'Save changes' : 'Create event'}</button>
+            )}
           </div>
         </>
       )}>
         <div className="space-y-4">
+          {/* Development-only diagnostics: show selectedEvent shape and detection result inline so users
+              can copy/paste without opening DevTools. This helps troubleshoot why the EditScopeModal
+              does or doesn't appear for a given event object. */}
+          {typeof process !== 'undefined' && process.env && process.env.NODE_ENV === 'development' && (
+            <div className="bg-gray-50 border border-gray-200 p-3 rounded text-xs text-gray-700 max-h-48 overflow-auto mb-2">
+              <div className="font-medium text-sm mb-1">Debug (dev only): selectedEvent shape</div>
+              <div className="mb-2"><strong>isSeriesEvent:</strong> {String(isSeriesEvent)}</div>
+              <pre className="whitespace-pre-wrap break-words">{JSON.stringify(selectedEvent, null, 2)}</pre>
+            </div>
+          )}
           <EventForm values={formData} onChange={(next) => setFormData(next)} courseOptions={courseOptions} repeatOption={formData.repeatOption} date={selectedEvent?.date} onOpenRepeat={() => setShowRepeatModal(true)} />
         </div>
       </ModalShell>
@@ -168,11 +262,83 @@ export default function EventModal({ visible = true, selectedEvent, modalMode = 
         }
         onClose && onClose();
       }} />
-      <EditScopeModal visible={showEditScopeModal} mode={'edit'} onClose={() => { setShowEditScopeModal(false); setPendingSavePayload(null); }} onConfirm={(scope) => {
+      <EditScopeModal visible={showEditScopeModal} mode={'edit'} onClose={() => { setShowEditScopeModal(false); setPendingSavePayload(null); }} onConfirm={async (scope) => {
         // when user confirms edit scope, call save handler with chosen scope
         setShowEditScopeModal(false);
         try {
-          if (pendingSavePayload) onSave && onSave(pendingSavePayload, scope);
+          if (!pendingSavePayload) return;
+          if (onSave && typeof onSave === 'function') {
+            await onSave(pendingSavePayload, scope);
+          } else {
+            // Fallback for legacy callers: perform a client-side bulk update when
+            // user chose 'all'. This mirrors the timetable bulk-update heuristic
+            // and ensures 'Update All' updates materialized occurrences even when
+            // provider/server linkage is missing.
+            try {
+              if (scope === 'all') {
+                try {
+                  const listResp = await fetch('/api/events');
+                  const listJson = listResp && listResp.ok ? await listResp.json().catch(() => null) : null;
+                  const eventsList = Array.isArray(listJson?.events) ? listJson.events : (Array.isArray(listJson) ? listJson : []);
+
+                  const tplId = selectedEvent && (selectedEvent.template_id || (selectedEvent.raw && (selectedEvent.raw.template_id || selectedEvent.raw.templateId))) || null;
+                  const baseDateStr = selectedEvent && (selectedEvent.date || (selectedEvent.raw && selectedEvent.raw.date) || selectedEvent.startDate) || null;
+
+                  const toPatch = eventsList.filter(ev => {
+                    try {
+                      const evTpl = ev && (ev.template_id || (ev.raw && (ev.raw.template_id || ev.raw.templateId))) || null;
+                      if (tplId && evTpl && String(evTpl) === String(tplId)) return true;
+
+                      // check embedded META JSON for template_id
+                      try {
+                        const desc = ev.description || (ev.raw && ev.raw.description) || '';
+                        const m = String(desc).match(/\[META\]([\s\S]*?)\[META\]/);
+                        if (m && m[1]) {
+                          try { const parsed = JSON.parse(m[1]); if (parsed && parsed.template_id && tplId && String(parsed.template_id) === String(tplId)) return true; } catch (e) {}
+                        }
+                      } catch (e) {}
+
+                      // fallback: match by title and time
+                      const titleMatch = pendingSavePayload && pendingSavePayload.title ? String(ev.title || ev.subject || '').trim() === String(pendingSavePayload.title).trim() : false;
+                      const timeMatch = pendingSavePayload && pendingSavePayload.time ? String(ev.time || ev.startTime || ev.start_time || (ev.raw && (ev.raw.time || ev.raw.startTime || ev.raw.start_time)) || '').slice(0,5) === String(pendingSavePayload.time || '').slice(0,5) : false;
+                      return titleMatch && timeMatch;
+                    } catch (e) { return false; }
+                  });
+
+                  try { console.debug('[EventModal] bulk update candidates:', toPatch.length, toPatch.map((x) => x && x.id)); } catch (e) {}
+                  for (const ev of toPatch) {
+                    try {
+                      const resp = await fetch(`/api/events/${encodeURIComponent(ev.id)}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(pendingSavePayload) });
+                      try { console.debug('[EventModal] PATCH', ev && ev.id, 'status', resp && resp.status); } catch (e) {}
+                    } catch (e) { console.warn('Bulk patch failed for', ev && ev.id, e); }
+                  }
+
+                  // Force a visible refresh so user sees updated occurrences
+                  try { if (typeof window !== 'undefined') window.location.reload(); } catch (e) {}
+                } catch (e) {
+                  console.warn('[EventModal] client-side bulk update failed', e);
+                }
+              } else {
+                // Non-'all' fallback: try provider handlers then direct PATCH
+                const schedulerHandlers = (typeof window !== 'undefined') ? window.__schedulerHandlers : null;
+                if (schedulerHandlers && typeof schedulerHandlers.handleUpdateEvent === 'function') {
+                  // Pass the event payload, id and scope
+                  await schedulerHandlers.handleUpdateEvent(pendingSavePayload, selectedEvent && selectedEvent.id, scope === 'all' ? 'all' : scope === 'future' ? 'future' : undefined);
+                } else if (typeof window !== 'undefined') {
+                  // As a last resort, attempt direct API PATCH with scope param
+                  try {
+                    const id = selectedEvent && selectedEvent.id;
+                    if (id) {
+                      const url = `/api/events/${encodeURIComponent(id)}${scope ? `?scope=${encodeURIComponent(scope)}` : ''}`;
+                      await fetch(url, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(pendingSavePayload) });
+                    }
+                  } catch (e) { /* ignore */ }
+                }
+              }
+            } catch (e) {
+              console.warn('[EventModal] fallback onConfirm handler failed', e);
+            }
+          }
         } finally {
           setPendingSavePayload(null);
           onClose && onClose();

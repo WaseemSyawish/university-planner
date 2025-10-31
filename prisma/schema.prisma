@@ -66,6 +66,7 @@ model AttendanceSession {
 
 model Event {
   id          String       @id @default(uuid())
+  template_id String?      @db.Uuid
   title       String
   type        String       @default("assignment")
   archived    Boolean      @default(false)
@@ -85,6 +86,8 @@ model Event {
   users       User         @relation(fields: [user_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
 
   @@index([date], map: "idx_events_date")
+  @@index([template_id], map: "idx_events_template_id")
+  @@index([template_id, date], map: "idx_events_template_date")
   @@index([user_id], map: "idx_events_user")
   @@map("events")
 }
@@ -92,6 +95,7 @@ model Event {
 model ArchivedEvent {
   id                String    @id @default(uuid())
   original_event_id String?   @unique
+  template_id       String?   @db.Uuid
   title             String
   type              String    @default("assignment")
   archived          Boolean   @default(true)
@@ -109,6 +113,8 @@ model ArchivedEvent {
   users             User      @relation(fields: [user_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
 
   @@index([date], map: "idx_archived_events_date")
+  @@index([template_id], map: "idx_archived_events_template_id")
+  @@index([template_id, date], map: "idx_archived_events_template_date")
   @@index([user_id], map: "idx_archived_events_user")
   @@map("archived_events")
 }
