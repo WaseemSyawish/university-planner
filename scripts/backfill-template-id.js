@@ -47,7 +47,21 @@ async function backfillArchived(batchSize = 500) {
   console.log('Starting backfill for archived events...');
   let skip = 0;
   while (true) {
-    const rows = await prisma.archivedEvent.findMany({ skip, take: batchSize, select: { id: true, description: true, meta: true, template_id: true } });
+    // Try to select the richer shape (with `meta`) but fall back if the model
+    // doesn't expose that field in the Prisma schema (some deployments).
+    let rows;
+    try {
+      rows = await prisma.archivedEvent.findMany({ skip, take: batchSize, select: { id: true, description: true, meta: true, template_id: true } });
+    } catch (err) {
+      // If `meta` isn't a known field on archivedEvent, fall back to a minimal select
+      // and continue. Re-throw unexpected errors.
+      const msg = String(err && err.message || '');
+      if (msg.includes('Unknown field') || msg.includes('for select statement on model')) {
+        rows = await prisma.archivedEvent.findMany({ skip, take: batchSize, select: { id: true, description: true, template_id: true } });
+      } else {
+        throw err;
+      }
+    }
     if (!rows || rows.length === 0) break;
     for (const r of rows) {
       if (r.template_id) continue;

@@ -429,6 +429,88 @@ export const SchedulerProvider = ({
   }
 
   async function handleUpdateEvent(event: Event, id: string, scope?: string) {
+    // For series-scoped updates (all/future) we prefer the server-authoritative
+    // path and do a preview-then-apply sequence from the provider so all UI
+    // entrypoints behave consistently. If this fails we fall back to the
+    // parent-provided handler or optimistic local update.
+    if (scope === 'all' || scope === 'future') {
+      try {
+        // Serialize a minimal body for preview; include date when available so
+        // server can compute 'future' boundaries correctly.
+        const serializeDate = (d: any) => {
+          try {
+            if (!d) return undefined;
+            if (d instanceof Date) return d.toISOString();
+            return String(d);
+          } catch (e) { return undefined; }
+        };
+
+        const previewBody: any = {};
+        if (Object.prototype.hasOwnProperty.call(event, 'date')) previewBody.date = event.date;
+        else if (Object.prototype.hasOwnProperty.call(event, 'startDate')) previewBody.date = serializeDate((event as any).startDate);
+
+        const previewQs = new URLSearchParams({ scope, preview: 'true' });
+        const previewUrl = `/api/events/${encodeURIComponent(id)}?${previewQs.toString()}`;
+        const previewRes = await fetch(previewUrl, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(previewBody)
+        });
+
+        // If preview failed, throw to trigger fallback below
+        if (!previewRes.ok) {
+          const txt = await previewRes.text().catch(() => null);
+          throw new Error(`Series preview failed ${previewRes.status}: ${txt}`);
+        }
+
+        const previewJson = await previewRes.json().catch(() => null);
+        // Now apply the update on the server using the authoritative payload.
+        // Build the apply body from the incoming event (convert Date -> ISO)
+        const applyBody: any = {};
+        if (Object.prototype.hasOwnProperty.call(event, 'title')) applyBody.title = (event as any).title;
+        if (Object.prototype.hasOwnProperty.call(event, 'description')) applyBody.description = (event as any).description;
+        if (Object.prototype.hasOwnProperty.call(event, 'time')) applyBody.time = (event as any).time;
+        if (Object.prototype.hasOwnProperty.call(event, 'date')) applyBody.date = event.date;
+        if (Object.prototype.hasOwnProperty.call(event, 'meta')) applyBody.meta = (event as any).meta;
+        // include repeatOption when present on raw/meta
+        try { if ((event as any).repeatOption) applyBody.repeatOption = (event as any).repeatOption; } catch (e) {}
+
+        const applyQs = new URLSearchParams({ scope });
+        const applyUrl = `/api/events/${encodeURIComponent(id)}?${applyQs.toString()}`;
+        const applyRes = await fetch(applyUrl, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(applyBody)
+        });
+
+        const applyJson = await applyRes.json().catch(() => null);
+        if (!applyRes.ok) {
+          const txt = await applyRes.text().catch(() => null);
+          throw new Error(`Series apply failed ${applyRes.status}: ${txt}`);
+        }
+
+        // Refresh authoritative event list from server when available
+        try {
+          const listRes = await fetch('/api/events');
+          if (listRes && listRes.ok) {
+            const body = await listRes.json().catch(() => null);
+            const eventsList = Array.isArray(body?.events) ? body.events : (Array.isArray(body) ? body : []);
+            dispatch({ type: 'SET_EVENTS', payload: eventsList });
+          }
+        } catch (e) {
+          // non-fatal: if refresh fails, attempt to update local event with returned value
+          try {
+            if (applyJson && applyJson.event) dispatch({ type: 'UPDATE_EVENT', payload: applyJson.event });
+          } catch (e2) {}
+        }
+
+        return applyJson;
+      } catch (seriesErr) {
+        console.warn('[SchedulerProvider] series-scoped update failed, falling back to parent handler or optimistic update', seriesErr);
+        // fall through to parent handler / optimistic update below
+      }
+    }
+
     // Prefer to let the parent persist the change and return the canonical
     // event; only then update local state with the authoritative values.
     if (onUpdateEvent) {

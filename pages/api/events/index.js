@@ -385,16 +385,15 @@ export default async function handler(req, res) {
         const tpl = await prisma.eventTemplate.create({ data: tplData });
         created = { template_id: tpl.id, template: tpl };
       } else if (repeatOption) {
-        // New behavior: materialize occurrences only when explicitly requested.
-        const materialize = !!req.body.materialize;
+        // New behavior: materialize occurrences by default for repeating schedules
+        // unless the client explicitly opts out (materialize=false).
+        const materialize = (typeof req.body.materialize !== 'undefined') ? !!req.body.materialize : true;
         const materializeCount = Number.isFinite(Number(req.body.materializeCount)) ? Number(req.body.materializeCount) : null;
         const materializeUntil = req.body.materializeUntil ? String(req.body.materializeUntil) : null;
-        // If no explicit materialization or template flag provided, refuse to implicitly create a template.
-        // Templates must be created explicitly by the client (isTemplate: true) so templates remain
-        // authoritative and empty by default unless the user chooses to populate them.
-        if (!materialize && !materializeCount && !materializeUntil && !isTemplate) {
-          return res.status(400).json({ code: 'MUST_SPECIFY_TEMPLATE_OR_MATERIALIZE', message: 'When creating repeating schedules you must either set isTemplate=true to save a timetable template, or set materialize/materializeCount/materializeUntil to materialize occurrences.' });
-        }
+        // Previously the API required an explicit materialize flag. We now default
+        // to materializing repeating schedules so newly-created repeats are backed
+        // by materialized event rows. Clients can opt out by sending
+        // materialize=false, or control the window with materializeCount/materializeUntil.
 
         // If we reach here and materialization flags are present, proceed to materialize occurrences.
   if (materialize || materializeCount || materializeUntil) {
@@ -480,15 +479,47 @@ export default async function handler(req, res) {
             // Materialize events without creating a template (older DBs)
             result = await prisma.$transaction(async (tx) => {
               const createdEvents = [];
+              // Create a canonical main event first (representing the series root)
+              // Use the first occurrence date as the main event's date.
+              let mainEvent = null;
+              try {
+                const mainDate = occDates && occDates.length > 0 ? occDates[0] : dt;
+                const mainCreate = {
+                  title: title || '',
+                  type: type || 'assignment',
+                  course_id: courseId || null,
+                  date: parseDateForStorage(mainDate),
+                  time: time || null,
+                  description: finalDescription,
+                  location: location,
+                  color: req.body && req.body.color ? String(req.body.color) : null,
+                  user_id: resolvedUserId ? String(resolvedUserId) : null
+                };
+                // Include meta if supported
+                if (metaToStore !== null) {
+                  try { mainCreate.meta = { ...metaToStore }; } catch (e) { mainCreate.meta = metaToStore; }
+                }
+                mainEvent = await createEventWithFallback(tx, mainCreate);
+                // persist template_id = mainEvent.id on the main row
+                try { await tx.event.update({ where: { id: mainEvent.id }, data: { template_id: mainEvent.id } }); } catch (e) { /* ignore */ }
+                createdEvents.push(mainEvent);
+              } catch (e) {
+                // If creating main fails, fall back to continuing with per-occurrence creates
+                console.warn('[api/events] failed to create main event for series materialization:', e && e.message ? e.message : e);
+                mainEvent = null;
+              }
+
               for (const d of occDates) {
-                  try {
-                  // Compute occurrence start datetime (date `d` may be a Date)
-                  // Build occurrence start as a deterministic UTC instant from date (d) and time
-                  // Avoid calling setHours on a Date parsed from a string (can be timezone-dependent).
+                try {
+                  // Skip creating a duplicate for the main date if we already created mainEvent
+                  if (mainEvent && mainEvent.date && new Date(mainEvent.date).getTime() === new Date(d).getTime()) {
+                    continue;
+                  }
+
+                  // Compute occurrence start datetime
                   let occStart;
                   try {
                     const dateObj = (d instanceof Date) ? d : new Date(String(d));
-                    // Extract year/month/day from the date-only value in local terms
                     const y = dateObj.getFullYear();
                     const m = dateObj.getMonth();
                     const day = dateObj.getDate();
@@ -498,15 +529,12 @@ export default async function handler(req, res) {
                       hh = Number(parts[0] || 0);
                       mm = Number(parts[1] || 0);
                     }
-                    // Use Date.UTC to create a UTC instant for the specified local Y/M/D and HH:MM
                     occStart = new Date(Date.UTC(y, m, day, Number.isFinite(hh) ? hh : 0, Number.isFinite(mm) ? mm : 0, 0));
                   } catch (e) {
                     occStart = (d instanceof Date) ? new Date(d) : new Date(String(d));
                   }
 
-                  // Determine durationMinutes for this occurrence. Prefer explicit durationMinutes
-                  // from the request; otherwise, if an endDate was provided for the original event,
-                  // compute duration from the original date -> endDate.
+                  // Determine durationMinutes
                   let occDurationMinutes = null;
                   if (typeof durationMinutes !== 'undefined' && durationMinutes !== null) {
                     occDurationMinutes = Number(durationMinutes);
@@ -524,7 +552,6 @@ export default async function handler(req, res) {
                     title: title || '',
                     type: type || 'assignment',
                     course_id: courseId || null,
-                    // store DateTime object (Prisma expects ISO DateTime)
                     date: parseDateForStorage(d),
                     time: time || null,
                     description: finalDescription,
@@ -533,13 +560,9 @@ export default async function handler(req, res) {
                     user_id: resolvedUserId ? String(resolvedUserId) : null
                   };
 
-                  // Attach end_date for this occurrence when we can compute it
                   if (occDurationMinutes !== null) {
-                    try {
-                      createData.end_date = new Date(occStart.getTime() + Number(occDurationMinutes) * 60000);
-                    } catch (e) { /* ignore */ }
+                    try { createData.end_date = new Date(occStart.getTime() + Number(occDurationMinutes) * 60000); } catch (e) { /* ignore */ }
                   } else if (req.body && req.body.endDate) {
-                    // Fallback: if original endDate exists but we couldn't compute duration, attempt to shift it
                     try {
                       const origStart = parseDateForStorage(date);
                       const origEnd = parseDateForStorage(req.body.endDate);
@@ -550,26 +573,25 @@ export default async function handler(req, res) {
                     } catch (e) { /* ignore */ }
                   }
 
-                  // Debug: log server-side computed occStart and end_date for each materialized occurrence
-                  try {
-                    console.info('[api/events] materialize (no-template) occStart:', occStart && occStart.toISOString ? occStart.toISOString() : String(occStart), 'computed end_date:', createData.end_date && createData.end_date.toISOString ? createData.end_date.toISOString() : String(createData.end_date));
-                  } catch (e) {}
-
-                  // Attach meta when available; otherwise include durationMinutes so client can reconstruct
                   if (metaToStore !== null) {
                     try {
-                      // clone to avoid mutating caller-provided object
                       const m = { ...metaToStore };
                       if ((typeof durationMinutes !== 'undefined' && durationMinutes !== null) && !m.durationMinutes) m.durationMinutes = Number(durationMinutes);
-                      // ensure meta.endDate reflects the computed end_date (if present)
                       if (createData.end_date && !(m.endDate)) m.endDate = createData.end_date instanceof Date ? createData.end_date.toISOString() : String(createData.end_date);
                       createData.meta = m;
                     } catch (e) { createData.meta = metaToStore; }
                   } else if (occDurationMinutes !== null) {
                     createData.meta = { durationMinutes: Number(occDurationMinutes), endDate: createData.end_date instanceof Date ? createData.end_date.toISOString() : createData.end_date };
                   }
+
+                  if (mainEvent && mainEvent.id) createData.template_id = mainEvent.id;
+
                   try { console.info('[api/events] creating materialized event (no template) with data:', JSON.stringify({ ...createData, meta: undefined }).slice(0,2000)); } catch(e) {}
                   const ev = await createEventWithFallback(tx, createData);
+                  if (!mainEvent) {
+                    mainEvent = ev;
+                    try { await tx.event.update({ where: { id: ev.id }, data: { template_id: ev.id } }); } catch (e) { /* ignore */ }
+                  }
                   createdEvents.push(ev);
                 } catch (ee) {
                   const mmsg = ee && ee.message ? String(ee.message) : '';
@@ -583,20 +605,51 @@ export default async function handler(req, res) {
                       description: finalDescription,
                       location: location,
                       color: req.body && req.body.color ? String(req.body.color) : null,
-                      user_id: resolvedUserId ? String(resolvedUserId) : null
+                      user_id: resolvedUserId ? String(resolvedUserId) : null,
+                      template_id: mainEvent && mainEvent.id ? mainEvent.id : undefined
                     });
+                    if (!mainEvent) {
+                      mainEvent = ev2;
+                      try { await tx.event.update({ where: { id: ev2.id }, data: { template_id: ev2.id } }); } catch (e) {}
+                    }
                     createdEvents.push(ev2);
                   } else {
                     throw ee;
                   }
                 }
               }
+
               return { template: null, events: createdEvents };
             });
           } else {
             result = await prisma.$transaction(async (tx) => {
               const tpl = await tx.eventTemplate.create({ data: templateData });
               const createdEvents = [];
+              // Create a canonical main event first for template-based path as well
+              let mainEvent = null;
+              try {
+                const mainDate = occDates && occDates.length > 0 ? occDates[0] : dt;
+                const mainCreate = {
+                  title: title || '',
+                  type: type || 'assignment',
+                  course_id: courseId || null,
+                  date: parseDateForStorage(mainDate),
+                  time: time || null,
+                  description: finalDescription,
+                  location: location,
+                  color: req.body && req.body.color ? String(req.body.color) : null,
+                  user_id: resolvedUserId ? String(resolvedUserId) : null
+                };
+                if (metaToStore !== null) {
+                  try { mainCreate.meta = { ...metaToStore }; } catch (e) { mainCreate.meta = metaToStore; }
+                }
+                mainEvent = await createEventWithFallback(tx, mainCreate);
+                try { await tx.event.update({ where: { id: mainEvent.id }, data: { template_id: mainEvent.id } }); } catch (e) {}
+                createdEvents.push(mainEvent);
+              } catch (e) {
+                console.warn('[api/events] failed to create main event for template path:', e && e.message ? e.message : e);
+                mainEvent = null;
+              }
               for (const d of occDates) {
                   try {
                   // Compute occurrence start datetime and end_date similar to non-template path
@@ -640,7 +693,8 @@ export default async function handler(req, res) {
                     location: location,
                     color: req.body && req.body.color ? String(req.body.color) : null,
                     user_id: resolvedUserId ? String(resolvedUserId) : null,
-                    template_id: tpl.id
+                    // ensure child occurrences inherit mainEvent.id as template_id when available
+                    template_id: mainEvent && mainEvent.id ? mainEvent.id : tpl.id
                   };
                   if (occDurationMinutes !== null) {
                     try { createData.end_date = new Date(occStart.getTime() + Number(occDurationMinutes) * 60000); } catch (e) {}
@@ -668,8 +722,16 @@ export default async function handler(req, res) {
                   } else if (occDurationMinutes !== null) {
                     createData.meta = { durationMinutes: Number(occDurationMinutes), endDate: createData.end_date instanceof Date ? createData.end_date.toISOString() : createData.end_date };
                   }
+                  // skip duplicate if we've already created mainEvent for the same date
+                  if (mainEvent && mainEvent.date && new Date(mainEvent.date).getTime() === new Date(d).getTime()) {
+                    continue;
+                  }
                   try { console.info('[api/events] creating materialized event for template with data:', JSON.stringify({ ...createData, meta: undefined }).slice(0,2000)); } catch(e) {}
                   const ev = await createEventWithFallback(tx, createData);
+                  if (!mainEvent) {
+                    mainEvent = ev;
+                    try { await tx.event.update({ where: { id: ev.id }, data: { template_id: ev.id } }); } catch (e) {}
+                  }
                   createdEvents.push(ev);
                 } catch (ee) {
                   const mmsg = ee && ee.message ? String(ee.message) : '';
@@ -684,14 +746,19 @@ export default async function handler(req, res) {
                       location: location,
                       color: req.body && req.body.color ? String(req.body.color) : null,
                       user_id: resolvedUserId ? String(resolvedUserId) : null,
-                      template_id: tpl.id
+                      template_id: mainEvent && mainEvent.id ? mainEvent.id : tpl.id
                     });
+                    if (!mainEvent) {
+                      mainEvent = ev2;
+                      try { await tx.event.update({ where: { id: ev2.id }, data: { template_id: ev2.id } }); } catch (e) {}
+                    }
                     createdEvents.push(ev2);
                   } else {
                     throw ee;
                   }
                 }
               }
+
               return { template: tpl, events: createdEvents };
             });
           }

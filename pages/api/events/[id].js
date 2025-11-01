@@ -749,6 +749,152 @@ export default async function handler(req, res) {
             return res.status(200).json({ success: true, message: 'Series updated', details: result });
           } catch (txErr) {
             console.error('[events/:id] PATCH series transaction error:', txErr);
+            // Attempt a safe non-transactional fallback: try per-row updates
+            // outside of a transaction so a single problematic row doesn't
+            // abort the entire operation. This increases resiliency across
+            // different Prisma/DB schemas.
+            try {
+              const fallbackResult = { updatedActive: 0, updatedArchived: 0, updatedActiveIds: [], updatedArchivedIds: [] };
+
+              // If we discovered a template id do the template-based path first
+              if (tplId) {
+                const whereActive = (scope === 'future' && targetDateForFuture) ? { template_id: String(tplId), date: { gte: targetDateForFuture } } : { template_id: String(tplId) };
+                const whereArchived = (scope === 'future' && targetDateForFuture) ? { template_id: String(tplId), date: { gte: targetDateForFuture } } : { template_id: String(tplId) };
+
+                let candidateActive = [];
+                let candidateArchived = [];
+                try { candidateActive = await prisma.event.findMany({ where: whereActive, select: { id: true } }); } catch (e) { candidateActive = []; }
+                try { candidateArchived = await prisma.archivedEvent.findMany({ where: whereArchived, select: { id: true } }); } catch (e) { candidateArchived = []; }
+
+                const activeIds = candidateActive.map(r => r.id);
+                const archivedIds = candidateArchived.map(r => r.id);
+
+                // Try updateMany first, but don't fail hard if it errors.
+                try {
+                  await prisma.event.updateMany({ where: whereActive, data: pickPrismaFields(updateData) });
+                  fallbackResult.updatedActive = activeIds.length;
+                  fallbackResult.updatedActiveIds = (process.env.NODE_ENV === 'development') ? activeIds : undefined;
+                } catch (e) {
+                  // Per-row updates as fallback
+                  for (const uid of activeIds) {
+                    try {
+                      await prisma.event.update({ where: { id: uid }, data: pickPrismaFields(updateData) });
+                      fallbackResult.updatedActive++;
+                      if (process.env.NODE_ENV === 'development') fallbackResult.updatedActiveIds.push(uid);
+                    } catch (pe) {
+                      try {
+                        const reduced = { ...pickPrismaFields(updateData) };
+                        if (Object.prototype.hasOwnProperty.call(reduced, 'meta')) delete reduced.meta;
+                        if (Object.prototype.hasOwnProperty.call(reduced, 'end_date')) delete reduced.end_date;
+                        await prisma.event.update({ where: { id: uid }, data: reduced });
+                        fallbackResult.updatedActive++;
+                        if (process.env.NODE_ENV === 'development') fallbackResult.updatedActiveIds.push(uid);
+                      } catch (ppe) {
+                        console.warn('[events/:id] fallback per-row update failed for active id', uid, ppe && ppe.message ? ppe.message : ppe);
+                      }
+                    }
+                  }
+                }
+
+                try {
+                  await prisma.archivedEvent.updateMany({ where: whereArchived, data: pickPrismaFields(updateData) });
+                  fallbackResult.updatedArchived = archivedIds.length;
+                  fallbackResult.updatedArchivedIds = (process.env.NODE_ENV === 'development') ? archivedIds : undefined;
+                } catch (e) {
+                  for (const aid of archivedIds) {
+                    try {
+                      await prisma.archivedEvent.update({ where: { id: aid }, data: pickPrismaFields(updateData) });
+                      fallbackResult.updatedArchived++;
+                      if (process.env.NODE_ENV === 'development') fallbackResult.updatedArchivedIds.push(aid);
+                    } catch (pae) {
+                      try {
+                        const reduced = { ...pickPrismaFields(updateData) };
+                        if (Object.prototype.hasOwnProperty.call(reduced, 'meta')) delete reduced.meta;
+                        if (Object.prototype.hasOwnProperty.call(reduced, 'end_date')) delete reduced.end_date;
+                        await prisma.archivedEvent.update({ where: { id: aid }, data: reduced });
+                        fallbackResult.updatedArchived++;
+                        if (process.env.NODE_ENV === 'development') fallbackResult.updatedArchivedIds.push(aid);
+                      } catch (ppae) {
+                        console.warn('[events/:id] fallback per-row update failed for archived id', aid, ppae && ppae.message ? ppae.message : ppae);
+                      }
+                    }
+                  }
+                }
+
+                return res.status(200).json({ success: true, message: 'Series updated (fallback)', details: fallbackResult });
+              }
+
+              // If tplId not available, attempt heuristic fallback: scan events and update matching ids
+              try {
+                const allActive = await prisma.event.findMany({ select: { id: true, title: true, date: true, time: true, description: true, meta: true, template_id: true } });
+                const idsToUpdate = new Set();
+                for (const e of allActive) {
+                  try {
+                    if (tplId && e.template_id && String(e.template_id) === String(tplId)) { idsToUpdate.add(e.id); continue; }
+                    if (tplId && e.meta && typeof e.meta === 'object') {
+                      if (String(e.meta.template_id || e.meta.templateId || '') === String(tplId)) { idsToUpdate.add(e.id); continue; }
+                    }
+                    if (repeatOptionQuery && e.meta && typeof e.meta === 'object') {
+                      if (String(e.meta.repeatOption || e.meta.repeat_option || e.meta.repeatoption || '') === String(repeatOptionQuery)) { idsToUpdate.add(e.id); continue; }
+                    }
+                    if (e.description && typeof e.description === 'string') {
+                      const m = String(e.description).match(/\[META\]([\s\S]*?)\[META\]/);
+                      if (m && m[1]) {
+                        try {
+                          const parsed = JSON.parse(m[1]);
+                          if (tplId && String(parsed.template_id || parsed.templateId || '') === String(tplId)) { idsToUpdate.add(e.id); continue; }
+                          if (repeatOptionQuery && String(parsed.repeatOption || parsed.repeat_option || parsed.repeatoption || '') === String(repeatOptionQuery)) { idsToUpdate.add(e.id); continue; }
+                        } catch (pe) { /* ignore parse errors */ }
+                      }
+                    }
+                  } catch (inner) { /* ignore per-event errors */ }
+                }
+
+                const updatedActiveIds = [];
+                let updatedActive = 0;
+                if (idsToUpdate.size > 0) {
+                  for (const uid of Array.from(idsToUpdate)) {
+                    try {
+                      await prisma.event.update({ where: { id: uid }, data: pickPrismaFields(updateData) });
+                      updatedActive++;
+                      if (process.env.NODE_ENV === 'development') updatedActiveIds.push(uid);
+                    } catch (perErr) {
+                      try {
+                        const reduced = { ...pickPrismaFields(updateData) };
+                        if (Object.prototype.hasOwnProperty.call(reduced, 'meta')) delete reduced.meta;
+                        if (Object.prototype.hasOwnProperty.call(reduced, 'end_date')) delete reduced.end_date;
+                        await prisma.event.update({ where: { id: uid }, data: reduced });
+                        updatedActive++;
+                        if (process.env.NODE_ENV === 'development') updatedActiveIds.push(uid);
+                      } catch (reducedErr) {
+                        // try archived fallbacks
+                        try {
+                          await prisma.archivedEvent.update({ where: { original_event_id: uid }, data: pickPrismaFields(updateData) });
+                          updatedActive++;
+                          if (process.env.NODE_ENV === 'development') updatedActiveIds.push(uid);
+                        } catch (archErr) {
+                          try {
+                            await prisma.archivedEvent.update({ where: { id: uid }, data: pickPrismaFields(updateData) });
+                            updatedActive++;
+                            if (process.env.NODE_ENV === 'development') updatedActiveIds.push(uid);
+                          } catch (finalErr) {
+                            console.warn('[events/:id] per-row fallback update failed for id=', uid, finalErr && finalErr.message ? finalErr.message : finalErr);
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+
+                return res.status(200).json({ success: true, message: 'Series updated (fallback heuristic)', details: { updatedActive, updatedActiveIds: (process.env.NODE_ENV === 'development') ? updatedActiveIds : undefined } });
+              } catch (heuristicErr) {
+                console.error('[events/:id] fallback heuristic update failed:', heuristicErr);
+              }
+            } catch (fallbackErr) {
+              console.error('[events/:id] fallback non-transactional update failed:', fallbackErr);
+            }
+
+            // If the fallback also failed, return the original transaction error info
             return res.status(500).json({ code: 'UPDATE_SERIES_FAILED', message: 'Failed to update event series', details: txErr?.message || String(txErr) });
           }
         }

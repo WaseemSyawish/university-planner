@@ -194,15 +194,17 @@ export default function AddEventModal({
   };
 
   // Helper: apply pending body to chosen scope (moved to component scope so modal can call it)
-  async function applyPendingBody(scope: string, options: { forceClient?: boolean } = {}) {
+  async function applyPendingBody(scope: string, options: { forceClient?: boolean; confirmApply?: boolean } = {}) {
     if (!eventData || !pendingBody) return;
     try {
       setSubmitting(true);
       const evAny2 = eventData as any;
       const tplId = evAny2.template_id || (evAny2.raw && (evAny2.raw.template_id || evAny2.raw.templateId)) || null;
 
-      // If single or no template, just patch the individual event
-      if (scope === 'single' || !tplId) {
+  // If single, just patch the individual event. Do NOT short-circuit when
+  // tplId is missing — we should still attempt server-side preview/apply or
+  // heuristic bulk updates for 'all'/'future'.
+  if (scope === 'single') {
         // Prefer to route through provider handlers so parent page can persist
         // the change (and accept scope). Fall back to direct fetch if handler
         // is not present.
@@ -230,23 +232,74 @@ export default function AddEventModal({
         return;
       }
 
-      // For 'future' and 'all', first try provider/server-side scoped update when available.
-      try {
-        // If caller requested to force client-side bulk update, skip provider path
-        if (!options.forceClient && handlers && typeof handlers.handleUpdateEvent === 'function') {
-          // Call provider handler and let it decide how to persist/refresh.
-          let handlerErr = null;
-          try {
-            await handlers.handleUpdateEvent(pendingBody as any, eventData.id, scope === 'all' ? 'all' : scope === 'future' ? 'future' : undefined);
-          } catch (he) {
-            handlerErr = he;
-            console.warn('handlers.handleUpdateEvent(scope) failed, will attempt server force or client fallback', he);
+      // If this call is arriving as the user's confirmed action from the
+      // EditScopeModal (confirmApply=true), skip any preview steps and perform
+      // the authoritative server-side apply path immediately.
+      if ((scope === 'all' || scope === 'future') && options.confirmApply) {
+        try {
+          // Sanitize payload for series-scoped apply: do NOT include per-occurrence
+          // date fields (date/startDate/endDate) since applying those would
+          // move all occurrences to the same date. Only include fields that are
+          // intended to change across the series (title, time, duration, meta).
+          const sanitizedBody: any = { ...(pendingBody || {}) };
+          delete sanitizedBody.date;
+          delete sanitizedBody.startDate;
+          delete sanitizedBody.endDate;
+
+          // Prefer provider handler so parent pages can persist and refresh
+          if (handlers && typeof handlers.handleUpdateEvent === 'function') {
+            await handlers.handleUpdateEvent(sanitizedBody as any, eventData.id, scope);
+            // provider should refresh state; close modal
+            setPendingBody(null);
+            setPendingSave(false);
+            setShowEditScope(false);
+            setSubmitting(false);
+            setClose();
+            return;
           }
 
-          // For series updates ('all'/'future') attempt a server-side preview
-          // to show how many materialized occurrences will be affected, then
-          // ask the user to confirm before applying the server-scoped PATCH.
-          if ((scope === 'all' || scope === 'future')) {
+          // Fallback: call server PATCH with scope using sanitized body
+          const applyQs = new URLSearchParams({ scope });
+          const applyUrl = `/api/events/${encodeURIComponent(eventData.id)}?${applyQs.toString()}` + (tplId ? `&templateId=${encodeURIComponent(tplId)}` : '');
+          const applyResp = await fetch(applyUrl, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(sanitizedBody) });
+          if (applyResp && applyResp.ok) {
+            // best-effort: refresh page so UI reflects bulk changes
+            setPendingBody(null);
+            setPendingSave(false);
+            setShowEditScope(false);
+            setSubmitting(false);
+            setTimeout(() => window.location.reload(), 150);
+            return;
+          }
+        } catch (applyErr) {
+          console.warn('[AddEventModal] server apply failed during confirmApply, will fall back to client heuristics', applyErr);
+        }
+      }
+
+      // For 'future' and 'all', first try provider/server-side scoped update when available.
+      try {
+        // For series-scoped edits we MUST prefer the server-scoped PATCH path
+        // to ensure the server bulk/updateMany logic runs. Calling the provider
+        // handler here can short-circuit into an optimistic single-item update
+        // which leaves other occurrences unchanged. So only call the provider
+        // handler for single-instance edits; for 'all'/'future' always use the
+        // server preview/apply flow below.
+        if (scope === 'single') {
+          if (!options.forceClient && handlers && typeof handlers.handleUpdateEvent === 'function') {
+            let handlerErr = null;
+            try {
+              await handlers.handleUpdateEvent(pendingBody as any, eventData.id, 'single');
+            } catch (he) {
+              handlerErr = he;
+              console.warn('handlers.handleUpdateEvent(single) failed, will attempt server fallback', he);
+            }
+          }
+        }
+
+        // For series updates ('all'/'future') attempt a server-side preview
+        // to show how many materialized occurrences will be affected, then
+        // ask the user to confirm before applying the server-scoped PATCH.
+        if ((scope === 'all' || scope === 'future')) {
             try {
               const qPreview = `?scope=${scope === 'all' ? 'all' : 'future'}&preview=true`;
               const previewUrl = `/api/events/${encodeURIComponent(eventData.id)}${qPreview}` + (tplId ? `&templateId=${encodeURIComponent(tplId)}` : '');
@@ -257,43 +310,20 @@ export default function AddEventModal({
                 const archivedCount = pj?.details?.candidateArchivedIds?.length || 0;
                 const total = activeCount + archivedCount;
                 if (total > 0) {
-                  const proceed = window.confirm(`About to update ${total} events in this series. Click OK to apply to all occurrences, or Cancel to abort.`);
-                  if (proceed) {
-                    const q = `?scope=${scope === 'all' ? 'all' : 'future'}` + (tplId ? `&templateId=${encodeURIComponent(tplId)}` : '');
-                    const applyUrl = `/api/events/${encodeURIComponent(eventData.id)}${q}`;
-                    const applyResp = await fetch(applyUrl, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(pendingBody) });
-                    if (applyResp && applyResp.ok) {
-                      handlers.handleLocalUpdateEvent?.({ ...(eventData as any), ...(pendingBody || {}) } as any);
-                      setPendingBody(null);
-                      setPendingSave(false);
-                      setShowEditScope(false);
-                      setClose();
-                      return;
-                    }
-                  } else {
-                    // User cancelled the preview/apply flow
-                    setSubmitting(false);
-                    return;
-                  }
-                } else {
-                  // No candidates found on server; fall through to client heuristics
+                  // Open the existing EditScopeModal so user can choose scope.
+                  setPendingBody(pendingBody);
+                  setShowEditScope(true);
+                  setSubmitting(false);
+                  return;
                 }
+              } else {
+                // No candidates found on server; fall through to client heuristics
               }
             } catch (se) {
               console.warn('[AddEventModal] server preview/apply attempt failed, will continue to client fallback', se);
             }
-          } else {
-            // For single-scope, let provider/local update
-            if (handlerErr === null && scope === 'single') {
-              handlers.handleLocalUpdateEvent?.({ ...(eventData as any), ...(pendingBody || {}) } as any);
-              setPendingBody(null);
-              setPendingSave(false);
-              setShowEditScope(false);
-              setClose();
-              return;
-            }
-          }
         }
+        
       } catch (e) {
         console.warn('handlers.handleUpdateEvent(scope) unexpected error, falling back to client bulk apply', e);
       }
@@ -325,22 +355,11 @@ export default function AddEventModal({
             const archivedCount = pj?.details?.candidateArchivedIds?.length || 0;
             const total = activeCount + archivedCount;
             if (total > 0) {
-              const proceed = window.confirm(`About to update ${total} events in this series. Click OK to apply to all occurrences, or Cancel to abort.`);
-              if (proceed) {
-                const q = `?scope=${scope === 'all' ? 'all' : 'future'}` + (discoveredTpl ? `&templateId=${encodeURIComponent(discoveredTpl)}` : '');
-                const applyUrl = `/api/events/${encodeURIComponent(eventData.id)}${q}`;
-                const applyResp = await fetch(applyUrl, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(pendingBody) });
-                if (applyResp && applyResp.ok) {
-                  setPendingBody(null);
-                  setPendingSave(false);
-                  setShowEditScope(false);
-                  setClose();
-                  return;
-                }
-              } else {
-                setSubmitting(false);
-                return;
-              }
+              // Open the existing EditScopeModal so user can choose scope.
+              setPendingBody(pendingBody);
+              setShowEditScope(true);
+              setSubmitting(false);
+              return;
             }
           }
         } catch (e) {
@@ -1463,13 +1482,19 @@ export default function AddEventModal({
                   </label>
                 </div>
               )}
-              <EditScopeModal visible={showEditScope} mode={'edit'} onClose={() => { setShowEditScope(false); setPendingSave(false); setPendingBody(null); }} onConfirm={(scope) => {
-                // apply pending body based on user's choice
-                setShowEditScope(false);
-                (async () => {
-                  await applyPendingBody(scope, { forceClient: forceClientBulk });
-                })();
-              }} />
+              <EditScopeModal
+                visible={showEditScope}
+                mode={'edit'}
+                initialScope={undefined}
+                onClose={() => { setShowEditScope(false); setPendingSave(false); setPendingBody(null); }}
+                onConfirm={(scope) => {
+                  // apply pending body based on user's choice
+                  setShowEditScope(false);
+                  (async () => {
+                    await applyPendingBody(scope, { forceClient: forceClientBulk, confirmApply: true });
+                  })();
+                }}
+              />
               {/* Delete scope modal for deletions initiated from this edit modal */}
               <EditScopeModal visible={showDeleteScope} mode={'delete'} onClose={() => { setShowDeleteScope(false); setConfirmingDelete(false); }} onConfirm={(scope) => {
                 // apply delete scope for the currently-open event

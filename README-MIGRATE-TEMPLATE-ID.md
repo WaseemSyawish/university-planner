@@ -5,14 +5,16 @@ Overview
 This project had an issue where "Update All" failed to update all materialized occurrences in a recurring series. The fix is to add a canonical `template_id` column to the `events` and `archived_events` tables, index it, backfill values from existing `meta`/`[META]` blocks, and let the server use `template_id` for efficient updateMany operations.
 
 Files created
-- prisma/migrations/20251101_add_template_id/migration.sql  -- SQL to alter tables and add indexes
-- prisma/migrations/20251101_add_template_id/README.md     -- instructions for applying the SQL
-- scripts/backfill-template-id.js                          -- Node/Prisma script to populate template_id from meta/description
+
+- prisma/migrations/20251101_add_template_id/migration.sql -- SQL to alter tables and add indexes
+- prisma/migrations/20251101_add_template_id/README.md -- instructions for applying the SQL
+- scripts/backfill-template-id.js -- Node/Prisma script to populate template_id from meta/description
 
 Steps (recommended)
-1) Backup your DB (do not skip for production)
 
-2) Apply the SQL migration
+1. Backup your DB (do not skip for production)
+
+2. Apply the SQL migration
 
 Using psql (replace <DATABASE_URL> with your connection string or ensure .env is set):
 
@@ -22,13 +24,13 @@ psql "$env:DATABASE_URL" -f prisma/migrations/20251101_add_template_id/migration
 
 Or use your DB provider UI to run the SQL in `prisma/migrations/20251101_add_template_id/migration.sql`.
 
-3) Regenerate Prisma client
+3. Regenerate Prisma client
 
 ```powershell
 npx prisma generate
 ```
 
-4) Run the backfill script (staging first)
+4. Run the backfill script (staging first)
 
 ```powershell
 node .\scripts\backfill-template-id.js
@@ -36,7 +38,8 @@ node .\scripts\backfill-template-id.js
 
 The script attempts to discover `template_id` inside `meta` JSON or `[META]...` blocks in `description`. It updates rows where a template id is found and logs progress.
 
-5) Verify changes
+5. Verify changes
+
 - Use the preview API to inspect candidate matches:
 
 ```powershell
