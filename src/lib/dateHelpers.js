@@ -15,7 +15,10 @@ export function parseDatePreserveLocal(input) {
     // and the server intentionally emitted a UTC instant for a local y/m/d hh:mm,
     // treat it as local by extracting the local components instead of letting
     // the Date parser convert from UTC to local (which causes off-by-one-day shifts).
-    const isoZ = s.match(/^(\d{4}-\d{2}-\d{2})T(\d{2}):(\d{2})(?::\d{2}(?:\.\d+)?)?Z$/);
+  // Match ISO-like instants that end in Z or a +00:00/-00:00 offset.
+  // Some servers serialize dates as e.g. 2025-10-04T00:00:00+00:00 which should
+  // be treated as a local date+time when the intent was a local midnight.
+  const isoZ = s.match(/^(\d{4}-\d{2}-\d{2})T(\d{2}):(\d{2})(?::\d{2}(?:\.\d+)?)?(?:Z|[+\-]00:00)$/);
     if (isoZ) {
       try {
         const datePart = isoZ[1];

@@ -193,6 +193,56 @@ export default function AddEventModal({
     );
   };
 
+  // Fully reset the form and related local state to either the original
+  // event values (when editing) or to fresh defaults (when creating).
+  const handleFullReset = () => {
+    try {
+      if (eventData) {
+        const color = (eventData as any)?.color || "blue";
+        const type = (eventData as any)?.type || "assignment";
+        reset({
+          title: eventData.title || "",
+          startDate: parseToDate((eventData as any).startDate),
+          endDate: parseToDate((eventData as any).endDate),
+          variant: (typeof eventData.variant === 'string' && (VARIANTS as readonly string[]).includes(eventData.variant)) ? (eventData.variant as Variant) : 'primary',
+          color: color,
+          type: type,
+        });
+        setSelectedColor(color);
+        setSelectedType(type);
+      } else {
+        // New form: clear to sensible defaults
+        reset({
+          title: "",
+          startDate: new Date(),
+          endDate: new Date(),
+          variant: defaultVariant,
+          color: (eventData as any)?.color || "blue",
+          type: (eventData as any)?.type || "assignment",
+        });
+        setSelectedColor((eventData as any)?.color || "blue");
+        setSelectedType((eventData as any)?.type || "assignment");
+      }
+
+      // Clear other UI state for recurrence/materialization/etc.
+      setSelectedByDays([]);
+      setIntervalWeeks(1);
+      setCreateTemplate(false);
+      setMaterializeCount(null);
+      setMaterializeUntil(null);
+      setModalPage(0);
+      setRecurrenceMode('none');
+      setConfirmingDelete(false);
+      setShowDeleteScope(false);
+      setPendingSave(false);
+      setPendingBody(null);
+      setShowEditScope(false);
+      setForceClientBulk(false);
+    } catch (e) {
+      console.warn('[AddEventModal] reset failed', e);
+    }
+  };
+
   // Helper: apply pending body to chosen scope (moved to component scope so modal can call it)
   async function applyPendingBody(scope: string, options: { forceClient?: boolean; confirmApply?: boolean } = {}) {
     if (!eventData || !pendingBody) return;
@@ -1158,7 +1208,7 @@ export default function AddEventModal({
             <>
               {/* Event Name */}
               <div className="space-y-1.5">
-                <Label htmlFor="title" className="text-xs font-semibold text-white flex items-center gap-1.5">
+                <Label htmlFor="title" className="text-xs font-semibold text-gray-900 dark:text-gray-100 flex items-center gap-1.5">
                   <svg className="w-3.5 h-3.5 text-gray-400 dark:text-slate-200" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 8h10M7 12h4m1 8l-4-4H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-3l-4 4z" />
                   </svg>
@@ -1169,10 +1219,13 @@ export default function AddEventModal({
                   {...register("title")} 
                   placeholder="e.g., Team Meeting, Study Session" 
                   className={cn(
-                    "h-10 px-3 rounded-lg border bg-white dark:bg-gray-900 text-gray-900 dark:text-white placeholder:text-gray-500 text-sm",
-                    "focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent",
-                    "transition-all duration-200",
-                    errors.title ? "border-red-500 focus:ring-red-500" : "border-gray-200 dark:border-gray-800"
+                    // Brighter placeholders than the shared Input defaults so they
+                    // are clearly visible in both light and dark themes.
+                    "h-10 px-3 rounded-lg border bg-white dark:bg-gray-900 text-gray-900 dark:text-white placeholder:text-gray-600 placeholder:opacity-100 dark:placeholder:text-gray-200 dark:placeholder:opacity-100 text-sm",
+                    // Override any focus/hover effects from the shared Input component
+                    // to keep this field visually static (no hover/focus rings).
+                    "focus:outline-none focus:ring-0 hover:shadow-none",
+                    errors.title ? "border-red-500" : "border-gray-200 dark:border-gray-700"
                   )} 
                 />
                 {errors.title && (
@@ -1426,6 +1479,14 @@ export default function AddEventModal({
                   className="p-3 text-sm font-semibold text-gray-700 dark:text-gray-300 bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-800 hover:border-gray-300 dark:hover:border-gray-700 transition-all duration-200"
                 >
                   Cancel
+                </Button>
+                <Button
+                  variant="outline"
+                  type="button"
+                  onClick={handleFullReset}
+                  className="p-3 text-sm font-semibold text-gray-700 dark:text-gray-300 bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-800 hover:border-gray-300 dark:hover:border-gray-700 transition-all duration-200"
+                >
+                  Reset
                 </Button>
                 <div className="flex items-center rounded-md overflow-hidden">
                   <button
